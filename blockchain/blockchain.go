@@ -2,28 +2,39 @@
 package blockchain 
 
 import (
-	"github.com/OmSingh2003/blockchain-go/blocks"
+	"github.com/OmSingh2003/blockchain-go/ProofOfWork"
+	"github.com/OmSingh2003/blockchain-go/types"
 )
 
-type Blockchain struct { // struct which takes a field Blocks of type [] of  blocks which is Blocks dir 
-	Blocks []*blocks.Block
-}
-// Appending a new block 
-func (bc *Blockchain) AddBlock(data string) { 
-	prevBlock := bc.Blocks[len(bc.Blocks)-1] // Accesses the last element of the `bc.Blocks` slice
-	newBlock := blocks.NewBlock(data, prevBlock.Hash) //Calls the `NewBlock` function, which is imported from the `blocks` package.
-	bc.Blocks = append(bc.Blocks, newBlock) // It adds `newBlock` to the end of the `bc.Blocks` slice
+type Blockchain struct {
+	Blocks []*types.Block
 }
 
-// newGenesisBlock is an unexported helper that creates and returns the initial (genesis) block.
-// This block has a predefined data string and an empty previous hash, as it's the first in the chain.
-func newGenesisBlock() *blocks.Block {
-	return blocks.NewBlock("Genesis Block", []byte{})
+// AddBlock creates and mines a new block with the given data
+func (bc *Blockchain) AddBlock(data string) {
+	prevBlock := bc.Blocks[len(bc.Blocks)-1]
+	newBlock := types.NewBlock(data, prevBlock.Hash)
+	
+	// Mine the block using ProofOfWork
+	ProofOfWork.MineBlock(newBlock)
+	
+	bc.Blocks = append(bc.Blocks, newBlock)
 }
 
-// NewBlockchain is an exported constructor that creates and returns a new Blockchain instance.
-// The new blockchain is always initialized with a genesis block.
+// newGenesisBlock creates and returns the initial (genesis) block
+func newGenesisBlock() *types.Block {
+	block := types.NewBlock("Genesis Block", []byte{})
+	ProofOfWork.MineBlock(block)
+	return block
+}
+
+// NewBlockchain creates and returns a new Blockchain instance
 func NewBlockchain() *Blockchain {
-	// Initialize the Blockchain with its 'Blocks' slice containing the genesis block.
-	return &Blockchain{Blocks: []*blocks.Block{newGenesisBlock()}}
+	return &Blockchain{Blocks: []*types.Block{newGenesisBlock()}}
+}
+
+// ValidateBlock validates the proof of work for a given block
+func ValidateBlock(block *types.Block) bool {
+	pow := ProofOfWork.NewProofOfWork(block)
+	return pow.Validate()
 }
