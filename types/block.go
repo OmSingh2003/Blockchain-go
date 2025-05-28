@@ -2,6 +2,7 @@ package types
 
 import (
 	"bytes"
+	"encoding/gob"
 	"strconv"
 	"time"
 )
@@ -15,6 +16,31 @@ type Block struct {
 	Nonce         int    // Number used in proof of work
 }
 
+// Serialize serializes the block
+func (b *Block) Serialize() ([]byte, error) {
+	var result bytes.Buffer
+	encoder := gob.NewEncoder(&result)
+	
+	err := encoder.Encode(b)
+	if err != nil {
+		return nil, err
+	}
+	
+	return result.Bytes(), nil
+}
+
+// DeserializeBlock deserializes a block
+func DeserializeBlock(data []byte) (*Block, error) {
+	var block Block
+	
+	decoder := gob.NewDecoder(bytes.NewReader(data))
+	err := decoder.Decode(&block)
+	if err != nil {
+		return nil, err
+	}
+	
+	return &block, nil
+}
 // NewBlock creates a new Block with given data and previous block hash
 func NewBlock(data string, prevBlockHash []byte) *Block {
 	return &Block{
