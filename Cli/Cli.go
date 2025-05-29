@@ -24,9 +24,10 @@ func NewCLI(bc *blockchain.Blockchain) *CLI {
 // printUsage prints the usage of the CLI
 func (cli *CLI) printUsage() {
 	fmt.Println("Usage:")
-	fmt.Println("  addblock -data DATA - add a block to the blockchain")
+	fmt.Println("  addblock -data DATA -miner ADDRESS - add a block to the blockchain and reward the miner")
 	fmt.Println("  printchain - print all the blocks of the blockchain")
 	fmt.Println("  getbalance -address ADDRESS - get balance of ADDRESS")
+	fmt.Println("  send -from FROM -to TO -amount AMOUNT - send AMOUNT of coins from FROM address to TO")
 }
 
 // validateArgs validates the command line arguments
@@ -37,39 +38,74 @@ func (cli *CLI) validateArgs() {
 	}
 }
 
+// send sends coins from one address to another
+func (cli *CLI) send(from, to string, amount int) error {
+    // Create a new transaction using a closure to pass the FindSpendableOutputs method
+    tx, err := transactions.NewUTXOTransaction(
+        from,
+        to,
+        amount,
+        func(address string, amount int) (int, map[string][]int, error) {
+            return cli.Bc.FindSpendableOutputs(address, amount)
+        },
+    )
+    if err != nil {
+        return fmt.Errorf("failed to create transaction: %v", err)
+    }
+
+    // Add the transaction to a new block
+    err = cli.Bc.AddBlock([]*transactions.Transaction{tx})
+    if err != nil {
+        return fmt.Errorf("failed to add block: %v", err)
+    }
+
+    fmt.Println("Success! Transaction has been added to the blockchain")
+    return nil
+}
+
 // addBlock adds a block to the blockchain
-func (cli *CLI) addBlock(data string) error {
-	// Create a simple transaction with the data
-	tx := &transactions.Transaction{
-		ID: []byte{},
-		Vin: []transactions.TxInput{
-			{
-				Txid:      []byte{},
-				Vout:      -1,
-				ScriptSig: data,
+func (cli *CLI) addBlock(data string, minerAddress string) error {
+	// Create a coinbase transaction for the miner
+	coinbaseTx := transactions.NewCoinbaseTx(minerAddress, "")
+
+	// Create a data transaction if data is provided
+	var txs []*transactions.Transaction
+	txs = append(txs, coinbaseTx)
+
+	if data != "" {
+		dataTx := &transactions.Transaction{
+			ID: []byte{},
+			Vin: []transactions.TxInput{
+				{
+					Txid:      []byte{},
+					Vout:      -1,
+					ScriptSig: data,
+				},
 			},
-		},
-		Vout: []transactions.TxOutput{
-			{
-				Value:        0,
-				ScriptPubKey: "data",
+			Vout: []transactions.TxOutput{
+				{
+					Value:        0,
+					ScriptPubKey: "data",
+				},
 			},
-		},
+		}
+
+		// Set the transaction ID
+		err := dataTx.SetID()
+		if err != nil {
+			return fmt.Errorf("failed to set transaction ID: %v", err)
+		}
+
+		txs = append(txs, dataTx)
 	}
 
-	// Set the transaction ID
-	err := tx.SetID()
-	if err != nil {
-		return fmt.Errorf("failed to set transaction ID: %v", err)
-	}
-
-	// Add the transaction to the blockchain
-	err = cli.Bc.AddBlock([]*transactions.Transaction{tx})
+	// Add the transactions to the blockchain
+	err := cli.Bc.AddBlock(txs)
 	if err != nil {
 		return fmt.Errorf("failed to add block: %v", err)
 	}
 
-	fmt.Println("Block added successfully!")
+	fmt.Printf("Block mined! Miner %s received the reward.\n", minerAddress)
 	return nil
 }
 
@@ -114,13 +150,7 @@ func (cli *CLI) printChain() error {
 
 // getBalance gets the balance of the specified address
 func (cli *CLI) getBalance(address string) error {
-	bc, err := blockchain.NewBlockchain()
-	if err != nil {
-		return fmt.Errorf("failed to create blockchain: %v", err)
-	}
-	defer bc.CloseDB()
-
-	UTXOs, err := bc.FindUTXO(address)
+	UTXOs, err := cli.Bc.FindUTXO(address)
 	if err != nil {
 		return fmt.Errorf("failed to find UTXO: %v", err)
 	}
@@ -142,10 +172,17 @@ func (cli *CLI) Run() error {
 	addBlockCmd := flag.NewFlagSet("addblock", flag.ExitOnError)
 	printChainCmd := flag.NewFlagSet("printchain", flag.ExitOnError)
 	getBalanceCmd := flag.NewFlagSet("getbalance", flag.ExitOnError)
+	sendCmd := flag.NewFlagSet("send", flag.ExitOnError)
 
 	// Define flags for commands
 	addBlockData := addBlockCmd.String("data", "", "Block data")
+	addBlockMiner := addBlockCmd.String("miner", "", "Miner address to receive the reward")
 	getBalanceAddress := getBalanceCmd.String("address", "", "The address to get balance for")
+	
+	// Send command flags
+	sendFrom := sendCmd.String("from", "", "Source wallet address")
+	sendTo := sendCmd.String("to", "", "Destination wallet address")
+	sendAmount := sendCmd.Int("amount", 0, "Amount to send")
 
 	// Parse the appropriate command
 	switch os.Args[1] {
@@ -164,6 +201,11 @@ func (cli *CLI) Run() error {
 		if err != nil {
 			return fmt.Errorf("failed to parse getbalance command: %v", err)
 		}
+	case "send":
+		err := sendCmd.Parse(os.Args[2:])
+		if err != nil {
+			return fmt.Errorf("failed to parse send command: %v", err)
+		}
 	default:
 		cli.printUsage()
 		return fmt.Errorf("invalid command: %s", os.Args[1])
@@ -171,12 +213,11 @@ func (cli *CLI) Run() error {
 
 	// Execute the appropriate command
 	if addBlockCmd.Parsed() {
-		if *addBlockData == "" {
+		if *addBlockMiner == "" {
 			addBlockCmd.Usage()
-			return fmt.Errorf("data flag is required")
+			return fmt.Errorf("miner address is required")
 		}
-
-		return cli.addBlock(*addBlockData)
+		return cli.addBlock(*addBlockData, *addBlockMiner)
 	}
 
 	if printChainCmd.Parsed() {
@@ -188,8 +229,23 @@ func (cli *CLI) Run() error {
 			getBalanceCmd.Usage()
 			return fmt.Errorf("address flag is required")
 		}
-		
 		return cli.getBalance(*getBalanceAddress)
+	}
+
+	if sendCmd.Parsed() {
+		if *sendFrom == "" {
+			sendCmd.Usage()
+			return fmt.Errorf("from address is required")
+		}
+		if *sendTo == "" {
+			sendCmd.Usage()
+			return fmt.Errorf("to address is required")
+		}
+		if *sendAmount <= 0 {
+			sendCmd.Usage()
+			return fmt.Errorf("amount must be greater than 0")
+		}
+		return cli.send(*sendFrom, *sendTo, *sendAmount)
 	}
 
 	return nil
