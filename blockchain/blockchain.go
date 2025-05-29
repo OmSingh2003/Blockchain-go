@@ -2,9 +2,11 @@
 package blockchain 
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	
 	"github.com/OmSingh2003/blockchain-go/ProofOfWork"
 	"github.com/OmSingh2003/blockchain-go/types"
@@ -19,8 +21,9 @@ const (
 
 // Blockchain represents the blockchain structure
 type Blockchain struct {
-	tip []byte   // Hash of the latest block
-	db  *bbolt.DB // Database connection
+	tip []byte      // Hash of the latest block
+	db  *bbolt.DB   // Database connection
+	mu  sync.RWMutex // Mutex for thread safety
 }
 
 // BlockchainIterator is used to iterate over blockchain blocks
@@ -29,8 +32,30 @@ type BlockchainIterator struct {
 	db          *bbolt.DB
 }
 
-// AddBlock creates and mines a new block with the given data
-func (bc *Blockchain) AddBlock(data string) error {
+// AddBlock creates and mines a new block with the given transactions.
+// It validates the transactions, mines the block using proof of work,
+// and adds it to the blockchain.
+func (bc *Blockchain) AddBlock(transactions []*types.Transaction) error {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	// Validate transactions
+	for _, tx := range transactions {
+		if err := tx.ValidateTransaction(); err != nil {
+			return fmt.Errorf("invalid transaction: %v", err)
+		}
+	}
+
+	// Ensure we have at least one transaction
+	if len(transactions) == 0 {
+		// Add a coinbase transaction if none provided
+		coinbase := NewCoinbaseTx("Miner", "Mining reward")
+		transactions = append(transactions, coinbase)
+	} else if !transactions[0].IsCoinbase() {
+		// Ensure the first transaction is a coinbase
+		coinbase := NewCoinbaseTx("Miner", "Mining reward")
+		transactions = append([]*types.Transaction{coinbase}, transactions...)
+	}
+
 	var lastHash []byte
 
 	// Get the last block hash
@@ -46,20 +71,34 @@ func (bc *Blockchain) AddBlock(data string) error {
 		return fmt.Errorf("failed to get last block hash: %v", err)
 	}
 
-	// Create and mine the new block
-	newBlock := types.NewBlock(data, lastHash)
+	// Create new block
+	newBlock := types.NewBlock(transactions, lastHash)
+	
+	// Validate block before mining
+	if err := newBlock.ValidateBlock(); err != nil {
+		return fmt.Errorf("invalid block: %v", err)
+	}
+
+	// Mine the block
 	ProofOfWork.MineBlock(newBlock)
 	
-	// Validate the block
-	if !ValidateBlock(newBlock) {
+	// Validate the proof of work
+	pow := ProofOfWork.NewProofOfWork(newBlock)
+	if !pow.Validate() {
 		return errors.New("invalid block: proof of work validation failed")
 	}
 	
-	// Store the new block in the database
+	// Store the new block in the database - use a single transaction to avoid race conditions
 	err = bc.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
 		if b == nil {
 			return errors.New("blocks bucket not found")
+		}
+		
+		// Check for concurrent modifications
+		currentTip := b.Get([]byte(lastHashKey))
+		if !bytes.Equal(currentTip, lastHash) {
+			return errors.New("blockchain tip has changed, please retry")
 		}
 		
 		// Serialize the block
@@ -68,20 +107,21 @@ func (bc *Blockchain) AddBlock(data string) error {
 			return fmt.Errorf("failed to serialize block: %v", err)
 		}
 		
+		// Get the block hash
+		blockHash := newBlock.CalculateHash()
+		
 		// Store the block
-		err = b.Put(newBlock.Hash, blockData)
-		if err != nil {
+		if err := b.Put(blockHash, blockData); err != nil {
 			return fmt.Errorf("failed to store block: %v", err)
 		}
 		
 		// Update the last hash
-		err = b.Put([]byte(lastHashKey), newBlock.Hash)
-		if err != nil {
+		if err := b.Put([]byte(lastHashKey), blockHash); err != nil {
 			return fmt.Errorf("failed to update last hash: %v", err)
 		}
 		
 		// Update the tip
-		bc.tip = newBlock.Hash
+		bc.tip = blockHash
 		
 		return nil
 	})
@@ -89,14 +129,50 @@ func (bc *Blockchain) AddBlock(data string) error {
 	return err
 }
 
+// NewCoinbaseTx creates a new coinbase transaction
+func NewCoinbaseTx(to, data string) *types.Transaction {
+	if data == "" {
+		data = fmt.Sprintf("Reward to '%s'", to)
+	}
+
+	txin := types.TxInput{
+		Txid:      []byte{},
+		Vout:      -1,
+		ScriptSig: data,
+	}
+
+	txout := types.TxOutput{
+		Value:        50, // Mining reward
+		ScriptPubKey: to,
+	}
+
+	tx := &types.Transaction{
+		ID:   []byte{},
+		Vin:  []types.TxInput{txin},
+		Vout: []types.TxOutput{txout},
+	}
+
+	// Set the transaction ID
+	err := tx.SetID()
+	if err != nil {
+		fmt.Printf("Error setting transaction ID: %v\n", err)
+	}
+
+	return tx
+}
+
 // newGenesisBlock creates and returns the initial (genesis) block
 func newGenesisBlock() *types.Block {
-	block := types.NewBlock("Genesis Block", []byte{})
+	coinbase := NewCoinbaseTx("Genesis", "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks")
+	block := types.NewBlock([]*types.Transaction{coinbase}, []byte{})
 	ProofOfWork.MineBlock(block)
 	return block
 }
 
-// NewBlockchain creates a new Blockchain or loads an existing one
+// NewBlockchain creates a new Blockchain or loads an existing one.
+// If the blockchain database already exists, it opens it and returns
+// the blockchain with the current tip. Otherwise, it creates a new
+// blockchain with a genesis block.
 func NewBlockchain() (*Blockchain, error) {
 	// Check if the blockchain database already exists
 	if dbExists() {
@@ -120,7 +196,11 @@ func NewBlockchain() (*Blockchain, error) {
 			return nil, fmt.Errorf("failed to get blockchain tip: %v", err)
 		}
 
-		return &Blockchain{tip, db}, nil
+		return &Blockchain{
+			tip: tip,
+			db:  db,
+			mu:  sync.RWMutex{},
+		}, nil
 	}
 
 	// Create a new blockchain with genesis block
@@ -140,30 +220,42 @@ func NewBlockchain() (*Blockchain, error) {
 
 		// Create and store the genesis block
 		genesis := newGenesisBlock()
+		
+		// Validate the genesis block
+		if err := genesis.ValidateBlock(); err != nil {
+			return fmt.Errorf("invalid genesis block: %v", err)
+		}
+		
 		blockData, err := genesis.Serialize()
 		if err != nil {
 			return fmt.Errorf("failed to serialize genesis block: %v", err)
 		}
 
-		err = b.Put(genesis.Hash, blockData)
-		if err != nil {
+		// Get the genesis block hash
+		genesisHash := genesis.CalculateHash()
+
+		// Store the block
+		if err := b.Put(genesisHash, blockData); err != nil {
 			return fmt.Errorf("failed to store genesis block: %v", err)
 		}
 
 		// Store the last hash
-		err = b.Put([]byte(lastHashKey), genesis.Hash)
-		if err != nil {
+		if err := b.Put([]byte(lastHashKey), genesisHash); err != nil {
 			return fmt.Errorf("failed to store last hash: %v", err)
 		}
 
-		tip = genesis.Hash
+		tip = genesisHash
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize blockchain: %v", err)
 	}
 
-	return &Blockchain{tip, db}, nil
+	return &Blockchain{
+		tip: tip,
+		db:  db,
+		mu:  sync.RWMutex{},
+	}, nil
 }
 
 // dbExists checks if the blockchain database already exists
@@ -178,8 +270,13 @@ func ValidateBlock(block *types.Block) bool {
 	return pow.Validate()
 }
 
-// Iterator returns a BlockchainIterator for traversing the blockchain
+// Iterator returns a BlockchainIterator for traversing the blockchain.
+// It allows for iterating through all blocks in the blockchain in reverse
+// order (from newest to oldest).
 func (bc *Blockchain) Iterator() (*BlockchainIterator, error) {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
+	
 	if bc.tip == nil {
 		return nil, errors.New("blockchain tip is nil")
 	}
@@ -223,8 +320,11 @@ func (i *BlockchainIterator) Next() (*types.Block, error) {
 	return block, nil
 }
 
-// GetBlockByHash retrieves a block by its hash
+// GetBlockByHash retrieves a block by its hash from the blockchain.
+// It returns the block if found, or an error if not.
 func (bc *Blockchain) GetBlockByHash(hash []byte) (*types.Block, error) {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 	var block *types.Block
 
 	err := bc.db.View(func(tx *bbolt.Tx) error {
@@ -254,8 +354,13 @@ func (bc *Blockchain) GetBlockByHash(hash []byte) (*types.Block, error) {
 	return block, nil
 }
 
-// CloseDB closes the database connection
+// CloseDB safely closes the database connection.
+// It should be called when the application exits to ensure
+// all data is properly written to disk.
 func (bc *Blockchain) CloseDB() error {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	
 	if bc.db != nil {
 		return bc.db.Close()
 	}

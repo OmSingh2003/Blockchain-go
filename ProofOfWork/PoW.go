@@ -19,7 +19,7 @@ type ProofOfWork struct {
 	target *big.Int
 }
 
-//  creates a ProofOfWork instance with a calculated target.
+// creates a ProofOfWork instance with a calculated target.
 func NewProofOfWork(b *types.Block) *ProofOfWork {
 	target := big.NewInt(1)
 	// Calculate target based on targetBits: target = 1 << (256 - targetBits)
@@ -29,20 +29,15 @@ func NewProofOfWork(b *types.Block) *ProofOfWork {
 	return pow
 }
 
-// prepareData creates the byte array to be hashed, including the nonce.
-func (pow *ProofOfWork) prepareData(nonce int) []byte {
-	return pow.block.PrepareData(nonce, targetBits)
-}
-
 // Run performs the mining operation to find a valid nonce and hash.
 func (pow *ProofOfWork) Run() (int, []byte) {
 	var hashInt big.Int
 	var hash [32]byte
 	nonce := 0
 
-	fmt.Printf("Mining the block containing data: \"%s\"\n", string(pow.block.Data))
+	fmt.Printf("Mining a block with %d transactions\n", len(pow.block.Transactions))
 	for nonce < maxNonce {
-		data := pow.prepareData(nonce)
+		data := pow.block.PrepareData(nonce, int64(targetBits))
 		hash = sha256.Sum256(data)
 		hashInt.SetBytes(hash[:]) // Convert hash to big.Int for comparison.
 
@@ -64,7 +59,7 @@ func (pow *ProofOfWork) Run() (int, []byte) {
 // Validate checks if the block's Proof-of-Work is valid.
 func (pow *ProofOfWork) Validate() bool {
 	var hashInt big.Int
-	data := pow.prepareData(pow.block.Nonce) // Use block's stored nonce.
+	data := pow.block.PrepareData(pow.block.Nonce, int64(targetBits))
 	hash := sha256.Sum256(data)
 	hashInt.SetBytes(hash[:])
 
@@ -76,7 +71,8 @@ func MineBlock(block *types.Block) {
 	pow := NewProofOfWork(block)
 	nonce, hash := pow.Run()
 
-	block.Hash = hash
-	block.Nonce = nonce
+	// Use proper setter methods for thread safety
+	block.SetNonce(nonce)
+	block.SetHash(hash)
 }
 

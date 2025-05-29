@@ -3,33 +3,32 @@ package Cli
 import (
 	"flag"
 	"fmt"
-	//"log"
 	"os"
 	"strconv"
 
 	"github.com/OmSingh2003/blockchain-go/blockchain"
 	"github.com/OmSingh2003/blockchain-go/ProofOfWork"
-	//"github.com/OmSingh2003/blockchain-go/types"
+	"github.com/OmSingh2003/blockchain-go/types"
 )
 
-// CLI represents a command line interface for the blockchain
+// CLI responsible for processing command line arguments
 type CLI struct {
-	bc *blockchain.Blockchain
+	Bc *blockchain.Blockchain
 }
 
 // NewCLI creates a new CLI instance
 func NewCLI(bc *blockchain.Blockchain) *CLI {
-	return &CLI{bc: bc}
+	return &CLI{Bc: bc}
 }
 
-// printUsage shows the command usage
+// printUsage prints the usage of the CLI
 func (cli *CLI) printUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  addblock -data DATA - add a block to the blockchain")
 	fmt.Println("  printchain - print all the blocks of the blockchain")
 }
 
-// validateArgs validates command line arguments
+// validateArgs validates the command line arguments
 func (cli *CLI) validateArgs() {
 	if len(os.Args) < 2 {
 		cli.printUsage()
@@ -37,15 +36,93 @@ func (cli *CLI) validateArgs() {
 	}
 }
 
-// Run processes command line arguments and executes commands
+// addBlock adds a block to the blockchain
+func (cli *CLI) addBlock(data string) error {
+	// Create a simple transaction with the data
+	tx := &types.Transaction{
+		ID: []byte{},
+		Vin: []types.TxInput{
+			{
+				Txid:      []byte{},
+				Vout:      -1,
+				ScriptSig: data,
+			},
+		},
+		Vout: []types.TxOutput{
+			{
+				Value:        0,
+				ScriptPubKey: "data",
+			},
+		},
+	}
+
+	// Set the transaction ID
+	err := tx.SetID()
+	if err != nil {
+		return fmt.Errorf("failed to set transaction ID: %v", err)
+	}
+
+	// Add the transaction to the blockchain
+	err = cli.Bc.AddBlock([]*types.Transaction{tx})
+	if err != nil {
+		return fmt.Errorf("failed to add block: %v", err)
+	}
+
+	fmt.Println("Block added successfully!")
+	return nil
+}
+
+// printChain prints all the blocks in the blockchain
+func (cli *CLI) printChain() error {
+	// Create an iterator for the blockchain
+	bci, err := cli.Bc.Iterator()
+	if err != nil {
+		return fmt.Errorf("failed to create blockchain iterator: %v", err)
+	}
+
+	for {
+		// Get the next block from the iterator
+		block, err := bci.Next()
+		if err != nil {
+			return fmt.Errorf("failed to get next block: %v", err)
+		}
+
+		if block == nil {
+			break
+		}
+
+		fmt.Printf("Hash: %x\n", block.Hash)
+		fmt.Printf("Prev. hash: %x\n", block.PrevBlockHash)
+		fmt.Printf("Timestamp: %d\n", block.Timestamp)
+		fmt.Printf("Nonce: %d\n", block.Nonce)
+		fmt.Printf("Transactions: %d\n", len(block.Transactions))
+		
+		for i, tx := range block.Transactions {
+			fmt.Printf("  Transaction %d: %x\n", i, tx.ID)
+			fmt.Printf("    Inputs: %d\n", len(tx.Vin))
+			fmt.Printf("    Outputs: %d\n", len(tx.Vout))
+		}
+		
+		pow := ProofOfWork.NewProofOfWork(block)
+		fmt.Printf("PoW: %s\n", strconv.FormatBool(pow.Validate()))
+		fmt.Println()
+	}
+
+	return nil
+}
+
+// Run processes command line arguments and executes the appropriate command
 func (cli *CLI) Run() error {
 	cli.validateArgs()
 
+	// Create new flagsets for each command
 	addBlockCmd := flag.NewFlagSet("addblock", flag.ExitOnError)
 	printChainCmd := flag.NewFlagSet("printchain", flag.ExitOnError)
 
+	// Define flags for addblock command
 	addBlockData := addBlockCmd.String("data", "", "Block data")
 
+	// Parse the appropriate command
 	switch os.Args[1] {
 	case "addblock":
 		err := addBlockCmd.Parse(os.Args[2:])
@@ -62,11 +139,13 @@ func (cli *CLI) Run() error {
 		return fmt.Errorf("invalid command: %s", os.Args[1])
 	}
 
+	// Execute the appropriate command
 	if addBlockCmd.Parsed() {
 		if *addBlockData == "" {
 			addBlockCmd.Usage()
 			return fmt.Errorf("data flag is required")
 		}
+
 		return cli.addBlock(*addBlockData)
 	}
 
@@ -74,48 +153,5 @@ func (cli *CLI) Run() error {
 		return cli.printChain()
 	}
 
-	return nil
-}
-
-// addBlock adds a new block to the blockchain
-func (cli *CLI) addBlock(data string) error {
-	err := cli.bc.AddBlock(data)
-	if err != nil {
-		return fmt.Errorf("failed to add block: %v", err)
-	}
-	fmt.Println("Success!")
-	return nil
-}
-
-// printChain prints all blocks in the blockchain
-func (cli *CLI) printChain() error {
-	bci, err := cli.bc.Iterator()
-	if err != nil {
-		return fmt.Errorf("failed to create blockchain iterator: %v", err)
-	}
-
-	for {
-		block, err := bci.Next()
-		if err != nil {
-			return fmt.Errorf("failed to get next block: %v", err)
-		}
-
-		if block == nil {
-			break
-		}
-
-		fmt.Printf("Prev. hash: %x\n", block.PrevBlockHash)
-		fmt.Printf("Data: %s\n", block.Data)
-		fmt.Printf("Hash: %x\n", block.Hash)
-		
-		pow := ProofOfWork.NewProofOfWork(block)
-		fmt.Printf("PoW: %s\n", strconv.FormatBool(pow.Validate()))
-		fmt.Println()
-
-		if len(block.PrevBlockHash) == 0 {
-			break
-		}
-	}
-	
 	return nil
 }
