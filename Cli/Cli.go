@@ -8,7 +8,7 @@ import (
 
 	"github.com/OmSingh2003/blockchain-go/blockchain"
 	"github.com/OmSingh2003/blockchain-go/ProofOfWork"
-	"github.com/OmSingh2003/blockchain-go/types"
+	"github.com/OmSingh2003/blockchain-go/transactions"
 )
 
 // CLI responsible for processing command line arguments
@@ -26,6 +26,7 @@ func (cli *CLI) printUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  addblock -data DATA - add a block to the blockchain")
 	fmt.Println("  printchain - print all the blocks of the blockchain")
+	fmt.Println("  getbalance -address ADDRESS - get balance of ADDRESS")
 }
 
 // validateArgs validates the command line arguments
@@ -39,16 +40,16 @@ func (cli *CLI) validateArgs() {
 // addBlock adds a block to the blockchain
 func (cli *CLI) addBlock(data string) error {
 	// Create a simple transaction with the data
-	tx := &types.Transaction{
+	tx := &transactions.Transaction{
 		ID: []byte{},
-		Vin: []types.TxInput{
+		Vin: []transactions.TxInput{
 			{
 				Txid:      []byte{},
 				Vout:      -1,
 				ScriptSig: data,
 			},
 		},
-		Vout: []types.TxOutput{
+		Vout: []transactions.TxOutput{
 			{
 				Value:        0,
 				ScriptPubKey: "data",
@@ -63,7 +64,7 @@ func (cli *CLI) addBlock(data string) error {
 	}
 
 	// Add the transaction to the blockchain
-	err = cli.Bc.AddBlock([]*types.Transaction{tx})
+	err = cli.Bc.AddBlock([]*transactions.Transaction{tx})
 	if err != nil {
 		return fmt.Errorf("failed to add block: %v", err)
 	}
@@ -111,6 +112,28 @@ func (cli *CLI) printChain() error {
 	return nil
 }
 
+// getBalance gets the balance of the specified address
+func (cli *CLI) getBalance(address string) error {
+	bc, err := blockchain.NewBlockchain()
+	if err != nil {
+		return fmt.Errorf("failed to create blockchain: %v", err)
+	}
+	defer bc.CloseDB()
+
+	UTXOs, err := bc.FindUTXO(address)
+	if err != nil {
+		return fmt.Errorf("failed to find UTXO: %v", err)
+	}
+
+	balance := 0
+	for _, out := range UTXOs {
+		balance += out.Value
+	}
+
+	fmt.Printf("Balance of '%s': %d\n", address, balance)
+	return nil
+}
+
 // Run processes command line arguments and executes the appropriate command
 func (cli *CLI) Run() error {
 	cli.validateArgs()
@@ -118,9 +141,11 @@ func (cli *CLI) Run() error {
 	// Create new flagsets for each command
 	addBlockCmd := flag.NewFlagSet("addblock", flag.ExitOnError)
 	printChainCmd := flag.NewFlagSet("printchain", flag.ExitOnError)
+	getBalanceCmd := flag.NewFlagSet("getbalance", flag.ExitOnError)
 
-	// Define flags for addblock command
+	// Define flags for commands
 	addBlockData := addBlockCmd.String("data", "", "Block data")
+	getBalanceAddress := getBalanceCmd.String("address", "", "The address to get balance for")
 
 	// Parse the appropriate command
 	switch os.Args[1] {
@@ -133,6 +158,11 @@ func (cli *CLI) Run() error {
 		err := printChainCmd.Parse(os.Args[2:])
 		if err != nil {
 			return fmt.Errorf("failed to parse printchain command: %v", err)
+		}
+	case "getbalance":
+		err := getBalanceCmd.Parse(os.Args[2:])
+		if err != nil {
+			return fmt.Errorf("failed to parse getbalance command: %v", err)
 		}
 	default:
 		cli.printUsage()
@@ -151,6 +181,15 @@ func (cli *CLI) Run() error {
 
 	if printChainCmd.Parsed() {
 		return cli.printChain()
+	}
+
+	if getBalanceCmd.Parsed() {
+		if *getBalanceAddress == "" {
+			getBalanceCmd.Usage()
+			return fmt.Errorf("address flag is required")
+		}
+		
+		return cli.getBalance(*getBalanceAddress)
 	}
 
 	return nil

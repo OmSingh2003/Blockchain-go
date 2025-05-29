@@ -1,23 +1,27 @@
 package serialization
+
 import (
-	"encoding/gob"
-	
-	"github.com/OmSingh2003/blockchain-go/types"
+    "bytes"
+    "encoding/gob"
+    "github.com/OmSingh2003/blockchain-go/types"
 )
-func (b Block.block) Searlize() []byte{
-	var result bytes.Buffer 
-	encoder := gob.NewEncoder(&result)
-	err := encoder.Encode(b)
 
-	return result.Bytes
-
+func SerializeBlock(b *types.Block) []byte {
+    var result bytes.Buffer
+    encoder := gob.NewEncoder(&result)
+    err := encoder.Encode(b)
+    if err != nil {
+        return nil
+    }
+    return result.Bytes()
 }
-func DeserializeBlock (d []byte) *Block {
-	var block  Block.block
 
-	decoder := gob.NewDecoder(bytes.NewReader(d))
-
-	err := decoder.Decode(&Block.block)
-	
-	return &block
-}  
+func DeserializeBlock(d []byte) *types.Block {
+    var block types.Block
+    decoder := gob.NewDecoder(bytes.NewReader(d))
+    err := decoder.Decode(&block)
+    if err != nil {
+        return nil
+    }
+    return &block
+}

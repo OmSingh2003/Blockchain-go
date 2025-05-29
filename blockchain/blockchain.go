@@ -3,12 +3,14 @@ package blockchain
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"sync"
 	
 	"github.com/OmSingh2003/blockchain-go/ProofOfWork"
+	"github.com/OmSingh2003/blockchain-go/transactions"
 	"github.com/OmSingh2003/blockchain-go/types"
 	"go.etcd.io/bbolt"
 )
@@ -35,25 +37,25 @@ type BlockchainIterator struct {
 // AddBlock creates and mines a new block with the given transactions.
 // It validates the transactions, mines the block using proof of work,
 // and adds it to the blockchain.
-func (bc *Blockchain) AddBlock(transactions []*types.Transaction) error {
+func (bc *Blockchain) AddBlock(txs []*transactions.Transaction) error {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 	// Validate transactions
-	for _, tx := range transactions {
+	for _, tx := range txs {
 		if err := tx.ValidateTransaction(); err != nil {
 			return fmt.Errorf("invalid transaction: %v", err)
 		}
 	}
 
 	// Ensure we have at least one transaction
-	if len(transactions) == 0 {
+	if len(txs) == 0 {
 		// Add a coinbase transaction if none provided
 		coinbase := NewCoinbaseTx("Miner", "Mining reward")
-		transactions = append(transactions, coinbase)
-	} else if !transactions[0].IsCoinbase() {
+		txs = append(txs, coinbase)
+	} else if !txs[0].IsCoinbase() {
 		// Ensure the first transaction is a coinbase
 		coinbase := NewCoinbaseTx("Miner", "Mining reward")
-		transactions = append([]*types.Transaction{coinbase}, transactions...)
+		txs = append([]*transactions.Transaction{coinbase}, txs...)
 	}
 
 	var lastHash []byte
@@ -72,7 +74,7 @@ func (bc *Blockchain) AddBlock(transactions []*types.Transaction) error {
 	}
 
 	// Create new block
-	newBlock := types.NewBlock(transactions, lastHash)
+	newBlock := types.NewBlock(txs, lastHash)
 	
 	// Validate block before mining
 	if err := newBlock.ValidateBlock(); err != nil {
@@ -130,26 +132,26 @@ func (bc *Blockchain) AddBlock(transactions []*types.Transaction) error {
 }
 
 // NewCoinbaseTx creates a new coinbase transaction
-func NewCoinbaseTx(to, data string) *types.Transaction {
+func NewCoinbaseTx(to, data string) *transactions.Transaction {
 	if data == "" {
 		data = fmt.Sprintf("Reward to '%s'", to)
 	}
 
-	txin := types.TxInput{
+	txin := transactions.TxInput{
 		Txid:      []byte{},
 		Vout:      -1,
 		ScriptSig: data,
 	}
 
-	txout := types.TxOutput{
+	txout := transactions.TxOutput{
 		Value:        50, // Mining reward
 		ScriptPubKey: to,
 	}
 
-	tx := &types.Transaction{
+	tx := &transactions.Transaction{
 		ID:   []byte{},
-		Vin:  []types.TxInput{txin},
-		Vout: []types.TxOutput{txout},
+		Vin:  []transactions.TxInput{txin},
+		Vout: []transactions.TxOutput{txout},
 	}
 
 	// Set the transaction ID
@@ -164,7 +166,7 @@ func NewCoinbaseTx(to, data string) *types.Transaction {
 // newGenesisBlock creates and returns the initial (genesis) block
 func newGenesisBlock() *types.Block {
 	coinbase := NewCoinbaseTx("Genesis", "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks")
-	block := types.NewBlock([]*types.Transaction{coinbase}, []byte{})
+	block := types.NewBlock([]*transactions.Transaction{coinbase}, []byte{})
 	ProofOfWork.MineBlock(block)
 	return block
 }
@@ -365,4 +367,118 @@ func (bc *Blockchain) CloseDB() error {
 		return bc.db.Close()
 	}
 	return nil
+}
+
+// FindUnspentTransactions returns a list of transactions containing unspent outputs for address
+func (bc *Blockchain) FindUnspentTransactions(address string) ([]*transactions.Transaction, error) {
+    bc.mu.RLock()
+    defer bc.mu.RUnlock()
+
+    var unspentTXs []*transactions.Transaction
+    spentTXOs := make(map[string][]int)
+    
+    iterator, err := bc.Iterator()
+    if err != nil {
+        return nil, fmt.Errorf("failed to create blockchain iterator: %v", err)
+    }
+
+    for {
+        block, err := iterator.Next()
+        if err != nil {
+            return nil, fmt.Errorf("failed to get next block: %v", err)
+        }
+        if block == nil {
+            break
+        }
+
+        for _, tx := range block.Transactions {
+            txID := hex.EncodeToString(tx.ID)
+
+        Outputs:
+            for outIdx, out := range tx.Vout {
+                if spentTXOs[txID] != nil {
+                    for _, spentOut := range spentTXOs[txID] {
+                        if spentOut == outIdx {
+                            continue Outputs
+                        }
+                    }
+                }
+
+                if out.CanBeUnlockedWith(address) {
+                    unspentTXs = append(unspentTXs, tx)
+                }
+            }
+
+            if !tx.IsCoinbase() {
+                for _, in := range tx.Vin {
+                    if in.CanUnlockOutputWith(address) {
+                        inTxID := hex.EncodeToString(in.Txid)
+                        spentTXOs[inTxID] = append(spentTXOs[inTxID], in.Vout)
+                    }
+                }
+            }
+        }
+
+        if len(block.PrevBlockHash) == 0 {
+            break
+        }
+    }
+
+    return unspentTXs, nil
+}
+
+// FindSpendableOutputs finds and returns unspent outputs to reference in inputs
+func (bc *Blockchain) FindSpendableOutputs(address string, amount int) (int, map[string][]int, error) {
+    bc.mu.RLock()
+    defer bc.mu.RUnlock()
+
+    unspentOutputs := make(map[string][]int)
+    accumulated := 0
+
+    unspentTXs, err := bc.FindUnspentTransactions(address)
+    if err != nil {
+        return 0, nil, fmt.Errorf("failed to find unspent transactions: %v", err)
+    }
+
+Work:
+    for _, tx := range unspentTXs {
+        txID := hex.EncodeToString(tx.ID)
+
+        for outIdx, out := range tx.Vout {
+            if out.CanBeUnlockedWith(address) && accumulated < amount {
+                accumulated += out.Value
+                unspentOutputs[txID] = append(unspentOutputs[txID], outIdx)
+
+                if accumulated >= amount {
+                    break Work
+                }
+            }
+        }
+    }
+
+    if accumulated < amount {
+        return accumulated, unspentOutputs, fmt.Errorf("not enough funds: got %d, need %d", accumulated, amount)
+    }
+
+    return accumulated, unspentOutputs, nil
+}
+
+// FindUTXO finds and returns all unspent transaction outputs for address
+func (bc *Blockchain) FindUTXO(address string) ([]transactions.TxOutput, error) {
+    var UTXOs []transactions.TxOutput
+    
+    unspentTransactions, err := bc.FindUnspentTransactions(address)
+    if err != nil {
+        return nil, fmt.Errorf("failed to find unspent transactions: %v", err)
+    }
+
+    for _, tx := range unspentTransactions {
+        for _, out := range tx.Vout {
+            if out.CanBeUnlockedWith(address) {
+                UTXOs = append(UTXOs, out)
+            }
+        }
+    }
+
+    return UTXOs, nil
 }
