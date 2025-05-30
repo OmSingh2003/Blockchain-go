@@ -9,6 +9,7 @@ import (
 	"github.com/OmSingh2003/blockchain-go/blockchain"
 	"github.com/OmSingh2003/blockchain-go/ProofOfWork"
 	"github.com/OmSingh2003/blockchain-go/transactions"
+	"github.com/OmSingh2003/blockchain-go/wallet"
 )
 
 // CLI responsible for processing command line arguments
@@ -24,10 +25,13 @@ func NewCLI(bc *blockchain.Blockchain) *CLI {
 // printUsage prints the usage of the CLI
 func (cli *CLI) printUsage() {
 	fmt.Println("Usage:")
+	fmt.Println("  createwallet - Creates a new wallet")
+	fmt.Println("  listaddresses - Lists all addresses in the wallet")
 	fmt.Println("  addblock -data DATA -miner ADDRESS - add a block to the blockchain and reward the miner")
 	fmt.Println("  printchain - print all the blocks of the blockchain")
 	fmt.Println("  getbalance -address ADDRESS - get balance of ADDRESS")
 	fmt.Println("  send -from FROM -to TO -amount AMOUNT - send AMOUNT of coins from FROM address to TO")
+	fmt.Println("  validateaddress -address ADDRESS - validate a wallet address")
 }
 
 // validateArgs validates the command line arguments
@@ -38,8 +42,54 @@ func (cli *CLI) validateArgs() {
 	}
 }
 
+// createWallet creates a new wallet
+func (cli *CLI) createWallet() error {
+	wallets, err := wallet.NewWallets()
+	if err != nil {
+		return fmt.Errorf("failed to create wallets: %v", err)
+	}
+
+	address := wallets.CreateWallet()
+	wallets.SaveToFile()
+
+	fmt.Printf("Your new address: %s\n", address)
+	return nil
+}
+
+// listAddresses lists all addresses in the wallet file
+func (cli *CLI) listAddresses() error {
+	wallets, err := wallet.NewWallets()
+	if err != nil {
+		return fmt.Errorf("failed to get wallets: %v", err)
+	}
+
+	addresses := wallets.GetAddresses()
+	for _, address := range addresses {
+		fmt.Println(address)
+	}
+
+	return nil
+}
+
+// validateAddress validates the given address
+func (cli *CLI) validateAddress(address string) error {
+	if !wallet.ValidateAddress(address) {
+		return fmt.Errorf("address %s is not valid", address)
+	}
+	fmt.Printf("Address %s is valid\n", address)
+	return nil
+}
+
 // send sends coins from one address to another
 func (cli *CLI) send(from, to string, amount int) error {
+    // Validate addresses first
+    if !wallet.ValidateAddress(from) {
+        return fmt.Errorf("sender address %s is not valid", from)
+    }
+    if !wallet.ValidateAddress(to) {
+        return fmt.Errorf("recipient address %s is not valid", to)
+    }
+
     // Create a new transaction using a closure to pass the FindSpendableOutputs method
     tx, err := transactions.NewUTXOTransaction(
         from,
@@ -65,6 +115,11 @@ func (cli *CLI) send(from, to string, amount int) error {
 
 // addBlock adds a block to the blockchain
 func (cli *CLI) addBlock(data string, minerAddress string) error {
+    // Validate miner's address
+    if !wallet.ValidateAddress(minerAddress) {
+        return fmt.Errorf("miner address %s is not valid", minerAddress)
+    }
+
 	// Create a coinbase transaction for the miner
 	coinbaseTx := transactions.NewCoinbaseTx(minerAddress, "")
 
@@ -150,6 +205,11 @@ func (cli *CLI) printChain() error {
 
 // getBalance gets the balance of the specified address
 func (cli *CLI) getBalance(address string) error {
+    // Validate address first
+    if !wallet.ValidateAddress(address) {
+        return fmt.Errorf("address %s is not valid", address)
+    }
+
 	UTXOs, err := cli.Bc.FindUTXO(address)
 	if err != nil {
 		return fmt.Errorf("failed to find UTXO: %v", err)
@@ -169,12 +229,16 @@ func (cli *CLI) Run() error {
 	cli.validateArgs()
 
 	// Create new flagsets for each command
+	createWalletCmd := flag.NewFlagSet("createwallet", flag.ExitOnError)
+	listAddressesCmd := flag.NewFlagSet("listaddresses", flag.ExitOnError)
+	validateAddressCmd := flag.NewFlagSet("validateaddress", flag.ExitOnError)
 	addBlockCmd := flag.NewFlagSet("addblock", flag.ExitOnError)
 	printChainCmd := flag.NewFlagSet("printchain", flag.ExitOnError)
 	getBalanceCmd := flag.NewFlagSet("getbalance", flag.ExitOnError)
 	sendCmd := flag.NewFlagSet("send", flag.ExitOnError)
 
 	// Define flags for commands
+	validateAddressArg := validateAddressCmd.String("address", "", "Address to validate")
 	addBlockData := addBlockCmd.String("data", "", "Block data")
 	addBlockMiner := addBlockCmd.String("miner", "", "Miner address to receive the reward")
 	getBalanceAddress := getBalanceCmd.String("address", "", "The address to get balance for")
@@ -186,6 +250,21 @@ func (cli *CLI) Run() error {
 
 	// Parse the appropriate command
 	switch os.Args[1] {
+	case "createwallet":
+		err := createWalletCmd.Parse(os.Args[2:])
+		if err != nil {
+			return fmt.Errorf("failed to parse createwallet command: %v", err)
+		}
+	case "listaddresses":
+		err := listAddressesCmd.Parse(os.Args[2:])
+		if err != nil {
+			return fmt.Errorf("failed to parse listaddresses command: %v", err)
+		}
+	case "validateaddress":
+		err := validateAddressCmd.Parse(os.Args[2:])
+		if err != nil {
+			return fmt.Errorf("failed to parse validateaddress command: %v", err)
+		}
 	case "addblock":
 		err := addBlockCmd.Parse(os.Args[2:])
 		if err != nil {
@@ -212,6 +291,22 @@ func (cli *CLI) Run() error {
 	}
 
 	// Execute the appropriate command
+	if createWalletCmd.Parsed() {
+		return cli.createWallet()
+	}
+
+	if listAddressesCmd.Parsed() {
+		return cli.listAddresses()
+	}
+
+	if validateAddressCmd.Parsed() {
+		if *validateAddressArg == "" {
+			validateAddressCmd.Usage()
+			return fmt.Errorf("address is required")
+		}
+		return cli.validateAddress(*validateAddressArg)
+	}
+
 	if addBlockCmd.Parsed() {
 		if *addBlockMiner == "" {
 			addBlockCmd.Usage()
