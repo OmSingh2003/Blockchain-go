@@ -23,3 +23,14 @@ func newKeyPair() (ecdsa.PrivateKey,[]byte) {
 
 	return *private,pubKey
 }
+
+func (w Wallet) GetAddress() []byte {
+	pubKeyHash := HashPubKey(w.PublicKey)
+	versionPayLoad := append([]byte{version},pubKeyHash...)
+	checksum := checksum(versionPayload)
+
+	fullPayload := append(versionPayload, checksum...)
+	address := Base58Encode(fullPayload)
+
+	return address
+}
