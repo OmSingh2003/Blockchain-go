@@ -2,8 +2,6 @@ package transactions
 
 import (
     "bytes"
-    "crypto/ecdsa"
-    "crypto/elliptic"
     "crypto/rand"
     "crypto/sha256"
     "encoding/gob"
@@ -11,9 +9,9 @@ import (
     "errors"
     "fmt"
     "log"
-    "math/big"
+    "time"
     
-    "github.com/omsingh/blockchain/wallet"
+    "github.com/OmSingh2003/blockchain-go/wallet"
 )
 
 // Transaction represents a blockchain transaction
@@ -79,6 +77,7 @@ func (bc *Blockchain) VerifyTransaction(tx *Transaction) (bool, error) {
 // Blockchain represents a chain of blocks
 type Blockchain struct {
     // Fields omitted for brevity
+    lastHash []byte
 }
 
 // FindTransaction finds a transaction by ID
@@ -284,7 +283,7 @@ func (tx *Transaction) ValidateTransaction(prevTXs map[string]Transaction) error
 
 // UsesKey checks whether the input uses the specified public key hash
 func (in *TxInput) UsesKey(pubKeyHash []byte) bool {
-    lockingHash := HashPubKey(in.PubKey)
+    lockingHash := wallet.HashPubKey(in.PubKey)
     return bytes.Compare(lockingHash, pubKeyHash) == 0
 }
 

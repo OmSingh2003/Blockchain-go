@@ -89,15 +89,36 @@ func (cli *CLI) send(from, to string, amount int) error {
     if !wallet.ValidateAddress(to) {
         return fmt.Errorf("recipient address %s is not valid", to)
     }
+    
+    // Get the wallet for the sender
+    wallets, err := wallet.NewWallets()
+    if err != nil {
+        return fmt.Errorf("failed to get wallets: %v", err)
+    }
+    
+    fromWallet := wallets.GetWallet(from)
+    if fromWallet == nil {
+        return fmt.Errorf("wallet not found for address: %s", from)
+    }
+    
+    // Convert recipient address to pubKeyHash
+    toPubKeyHash := []byte(to)
 
-    // Create a new transaction using a closure to pass the FindSpendableOutputs method
+    // Create a blockchain adapter for the transaction package
+    txBC := &transactions.Blockchain{}
+    
+    // Create a wrapper function to convert the parameters for FindSpendableOutputs
+    findSpendableOutputs := func(pubKeyHash []byte, amount int) (int, map[string][]int, error) {
+        return cli.Bc.FindSpendableOutputs(string(pubKeyHash), amount)
+    }
+
+    // Create a new transaction using the wallet and pubKeyHash
     tx, err := transactions.NewUTXOTransaction(
-        from,
-        to,
+        fromWallet,
+        toPubKeyHash,
         amount,
-        func(address string, amount int) (int, map[string][]int, error) {
-            return cli.Bc.FindSpendableOutputs(address, amount)
-        },
+        txBC,
+        findSpendableOutputs,
     )
     if err != nil {
         return fmt.Errorf("failed to create transaction: %v", err)
@@ -120,8 +141,11 @@ func (cli *CLI) addBlock(data string, minerAddress string) error {
         return fmt.Errorf("miner address %s is not valid", minerAddress)
     }
 
+    // Convert minerAddress to pubKeyHash
+    minerPubKeyHash := []byte(minerAddress)
+
 	// Create a coinbase transaction for the miner
-	coinbaseTx := transactions.NewCoinbaseTx(minerAddress, "")
+	coinbaseTx := transactions.NewCoinbaseTx(minerPubKeyHash, "")
 
 	// Create a data transaction if data is provided
 	var txs []*transactions.Transaction
@@ -134,22 +158,20 @@ func (cli *CLI) addBlock(data string, minerAddress string) error {
 				{
 					Txid:      []byte{},
 					Vout:      -1,
-					ScriptSig: data,
+					Signature: nil,
+					PubKey:    []byte(data),
 				},
 			},
 			Vout: []transactions.TxOutput{
 				{
-					Value:        0,
-					ScriptPubKey: "data",
+					Value:      0,
+					PubKeyHash: []byte("data"),
 				},
 			},
 		}
 
-		// Set the transaction ID
-		err := dataTx.SetID()
-		if err != nil {
-			return fmt.Errorf("failed to set transaction ID: %v", err)
-		}
+		// Set the transaction ID using Hash method
+		dataTx.ID = dataTx.Hash()
 
 		txs = append(txs, dataTx)
 	}

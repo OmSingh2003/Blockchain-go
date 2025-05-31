@@ -112,7 +112,8 @@ func IntToHex(num int64) []byte {
 }
 
 // ValidateBlock performs basic validation of the block
-func (b *Block) ValidateBlock() error {
+// prevTXs is a map of previous transactions needed for transaction validation
+func (b *Block) ValidateBlock(prevTXs map[string]transactions.Transaction) error {
     b.mu.RLock()
     defer b.mu.RUnlock()
 
@@ -131,7 +132,12 @@ func (b *Block) ValidateBlock() error {
     
     // Validate each transaction
     for i, tx := range b.Transactions {
-        if err := tx.ValidateTransaction(); err != nil {
+        // Skip validation for coinbase transaction
+        if tx.IsCoinbase() {
+            continue
+        }
+        
+        if err := tx.ValidateTransaction(prevTXs); err != nil {
             return fmt.Errorf("invalid transaction at index %d: %v", i, err)
         }
     }

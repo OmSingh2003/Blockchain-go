@@ -40,9 +40,10 @@ type BlockchainIterator struct {
 func (bc *Blockchain) AddBlock(txs []*transactions.Transaction) error {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
-	// Validate transactions
+// Validate transactions
+	prevTXs := make(map[string]transactions.Transaction)
 	for _, tx := range txs {
-		if err := tx.ValidateTransaction(); err != nil {
+		if err := tx.ValidateTransaction(prevTXs); err != nil {
 			return fmt.Errorf("invalid transaction: %v", err)
 		}
 	}
@@ -76,8 +77,8 @@ func (bc *Blockchain) AddBlock(txs []*transactions.Transaction) error {
 	// Create new block
 	newBlock := types.NewBlock(txs, lastHash)
 	
-	// Validate block before mining
-	if err := newBlock.ValidateBlock(); err != nil {
+// Validate block before mining
+	if err := newBlock.ValidateBlock(prevTXs); err != nil {
 		return fmt.Errorf("invalid block: %v", err)
 	}
 
@@ -140,12 +141,13 @@ func NewCoinbaseTx(to, data string) *transactions.Transaction {
 	txin := transactions.TxInput{
 		Txid:      []byte{},
 		Vout:      -1,
-		ScriptSig: data,
+		Signature: nil,
+		PubKey:    []byte(data),
 	}
 
 	txout := transactions.TxOutput{
-		Value:        50, // Mining reward
-		ScriptPubKey: to,
+		Value:      50, // Mining reward
+		PubKeyHash: []byte(to),
 	}
 
 	tx := &transactions.Transaction{
@@ -155,10 +157,7 @@ func NewCoinbaseTx(to, data string) *transactions.Transaction {
 	}
 
 	// Set the transaction ID
-	err := tx.SetID()
-	if err != nil {
-		fmt.Printf("Error setting transaction ID: %v\n", err)
-	}
+	tx.ID = tx.Hash()
 
 	return tx
 }
@@ -224,7 +223,8 @@ func NewBlockchain() (*Blockchain, error) {
 		genesis := newGenesisBlock()
 		
 		// Validate the genesis block
-		if err := genesis.ValidateBlock(); err != nil {
+		prevTXs := make(map[string]transactions.Transaction)
+		if err := genesis.ValidateBlock(prevTXs); err != nil {
 			return fmt.Errorf("invalid genesis block: %v", err)
 		}
 		
@@ -404,18 +404,22 @@ func (bc *Blockchain) FindUnspentTransactions(address string) ([]*transactions.T
                     }
                 }
 
-                if out.CanBeUnlockedWith(address) {
-                    unspentTXs = append(unspentTXs, tx)
-                }
+				// Convert address string to pubKeyHash
+				pubKeyHash := []byte(address)
+				if out.IsLockedWithKey(pubKeyHash) {
+					unspentTXs = append(unspentTXs, tx)
+				}
             }
 
             if !tx.IsCoinbase() {
-                for _, in := range tx.Vin {
-                    if in.CanUnlockOutputWith(address) {
-                        inTxID := hex.EncodeToString(in.Txid)
-                        spentTXOs[inTxID] = append(spentTXOs[inTxID], in.Vout)
-                    }
-                }
+				for _, in := range tx.Vin {
+					// Convert address string to pubKeyHash
+					pubKeyHash := []byte(address)
+					if in.UsesKey(pubKeyHash) {
+						inTxID := hex.EncodeToString(in.Txid)
+						spentTXOs[inTxID] = append(spentTXOs[inTxID], in.Vout)
+					}
+				}
             }
         }
 
@@ -445,14 +449,16 @@ Work:
         txID := hex.EncodeToString(tx.ID)
 
         for outIdx, out := range tx.Vout {
-            if out.CanBeUnlockedWith(address) && accumulated < amount {
-                accumulated += out.Value
-                unspentOutputs[txID] = append(unspentOutputs[txID], outIdx)
+			// Convert address string to pubKeyHash
+			pubKeyHash := []byte(address)
+			if out.IsLockedWithKey(pubKeyHash) && accumulated < amount {
+				accumulated += out.Value
+				unspentOutputs[txID] = append(unspentOutputs[txID], outIdx)
 
-                if accumulated >= amount {
-                    break Work
-                }
-            }
+				if accumulated >= amount {
+					break Work
+				}
+			}
         }
     }
 
@@ -474,9 +480,11 @@ func (bc *Blockchain) FindUTXO(address string) ([]transactions.TxOutput, error) 
 
     for _, tx := range unspentTransactions {
         for _, out := range tx.Vout {
-            if out.CanBeUnlockedWith(address) {
-                UTXOs = append(UTXOs, out)
-            }
+			// Convert address string to pubKeyHash
+			pubKeyHash := []byte(address)
+			if out.IsLockedWithKey(pubKeyHash) {
+				UTXOs = append(UTXOs, out)
+			}
         }
     }
 
