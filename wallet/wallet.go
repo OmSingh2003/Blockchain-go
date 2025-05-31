@@ -277,6 +277,7 @@ func ReverseBytes(data []byte) {
 func (w *Wallet) GetStringAddress() string {
 	return hex.EncodeToString(w.GetAddress())
 }
+
 // SignData signs data with the wallet's private key
 func (w *Wallet) SignData(data []byte) ([]byte, error) {
 	r, s, err := ecdsa.Sign(rand.Reader, &w.PrivateKey, data)
@@ -304,6 +305,6 @@ func VerifySignature(pubKey, data, signature []byte) bool {
 	x.SetBytes(pubKey[:(keyLen / 2)])
 	y.SetBytes(pubKey[(keyLen / 2):])
 
-	rawPubKey := ecdsa.PublicKey{curve, &x, &y}
+	rawPubKey := ecdsa.PublicKey{Curve: curve, X: &x, Y: &y}
 	return ecdsa.Verify(&rawPubKey, data, &r, &s)
 }
