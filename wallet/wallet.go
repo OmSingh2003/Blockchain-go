@@ -277,29 +277,19 @@ func ReverseBytes(data []byte) {
 func (w *Wallet) GetStringAddress() string {
 	return hex.EncodeToString(w.GetAddress())
 }
-
-// ExportPrivateKey exports the private key in a format suitable for signing
-func (w *Wallet) ExportPrivateKey() *ecdsa.PrivateKey {
-	return &w.PrivateKey
-}
-
-// SignData signs the provided data with the wallet's private key
+// SignData signs data with the wallet's private key
 func (w *Wallet) SignData(data []byte) ([]byte, error) {
 	r, s, err := ecdsa.Sign(rand.Reader, &w.PrivateKey, data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to sign data: %v", err)
+		return nil, err
 	}
 	
 	signature := append(r.Bytes(), s.Bytes()...)
 	return signature, nil
 }
 
-// VerifySignature verifies that a signature is valid for the given data and public key
-func VerifySignature(pubKey []byte, data []byte, signature []byte) bool {
-	if len(signature) == 0 || len(pubKey) == 0 {
-		return false
-	}
-
+// VerifySignature verifies that the signature is valid for the given public key and data
+func VerifySignature(pubKey, data, signature []byte) bool {
 	curve := elliptic.P256()
 	
 	r := big.Int{}
@@ -314,6 +304,6 @@ func VerifySignature(pubKey []byte, data []byte, signature []byte) bool {
 	x.SetBytes(pubKey[:(keyLen / 2)])
 	y.SetBytes(pubKey[(keyLen / 2):])
 
-	rawPubKey := ecdsa.PublicKey{Curve: curve, X: &x, Y: &y}
+	rawPubKey := ecdsa.PublicKey{curve, &x, &y}
 	return ecdsa.Verify(&rawPubKey, data, &r, &s)
 }
