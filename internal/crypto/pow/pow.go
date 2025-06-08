@@ -6,7 +6,7 @@ import (
     "math"
     "math/big"
 
-    "github.com/OmSingh2003/blockchain-go/internal/block"
+    "github.com/OmSingh2003/decentralized-ledger/internal/block"
 )
 
 // targetBits defines the difficulty (e.g., number of leading zeros).

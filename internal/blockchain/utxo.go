@@ -5,8 +5,8 @@ import (
     "encoding/hex"
     "log"
 
-    "github.com/OmSingh2003/blockchain-go/internal/block"
-    "github.com/OmSingh2003/blockchain-go/internal/transaction"
+    "github.com/OmSingh2003/decentralized-ledger/internal/block"
+    "github.com/OmSingh2003/decentralized-ledger/internal/transaction"
     "go.etcd.io/bbolt"
 )
 

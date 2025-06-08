@@ -9,7 +9,7 @@ import (
     "fmt"
     "log"
     
-    "github.com/OmSingh2003/blockchain-go/internal/wallet"
+    "github.com/OmSingh2003/decentralized-ledger/internal/wallet"
 )
 
 // Rest of the file content remains the same...

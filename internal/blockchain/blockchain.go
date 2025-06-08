@@ -6,10 +6,10 @@ import (
     "os"
     "sync"
 
-    "github.com/OmSingh2003/blockchain-go/internal/block"
-    "github.com/OmSingh2003/blockchain-go/internal/crypto/pow"
-    "github.com/OmSingh2003/blockchain-go/internal/transaction"
-    "github.com/OmSingh2003/blockchain-go/internal/wallet"
+    "github.com/OmSingh2003/decentralized-ledger/internal/block"
+    "github.com/OmSingh2003/decentralized-ledger/internal/crypto/pow"
+    "github.com/OmSingh2003/decentralized-ledger/internal/transaction"
+    "github.com/OmSingh2003/decentralized-ledger/internal/wallet"
     "go.etcd.io/bbolt"
 )
 

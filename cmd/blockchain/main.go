@@ -6,9 +6,9 @@ import (
     "log"
     "os"
     
-    "github.com/OmSingh2003/blockchain-go/internal/blockchain"
-    "github.com/OmSingh2003/blockchain-go/internal/cli"
-    "github.com/OmSingh2003/blockchain-go/internal/wallet"
+    "github.com/OmSingh2003/decentralized-ledger/internal/blockchain"
+    "github.com/OmSingh2003/decentralized-ledger/internal/cli"
+    "github.com/OmSingh2003/decentralized-ledger/internal/wallet"
 )
 
 func main() {

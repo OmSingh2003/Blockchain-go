@@ -9,7 +9,7 @@ import (
     "sync"
     "time"
 
-    "github.com/OmSingh2003/blockchain-go/internal/transaction"
+    "github.com/OmSingh2003/decentralized-ledger/internal/transaction"
 )
 
 // Block represents a block in the blockchain

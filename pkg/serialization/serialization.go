@@ -3,7 +3,7 @@ package serialization
 import (
     "bytes"
     "encoding/gob"
-    "github.com/OmSingh2003/blockchain-go/internal/block"
+    "github.com/OmSingh2003/decentralized-ledger/internal/block"
 )
 
 func SerializeBlock(b *block.Block) []byte {

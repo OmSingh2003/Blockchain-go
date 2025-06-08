@@ -6,10 +6,10 @@ import (
     "os"
     "strconv"
 
-    "github.com/OmSingh2003/blockchain-go/internal/blockchain"
-    "github.com/OmSingh2003/blockchain-go/internal/crypto/pow"
-    "github.com/OmSingh2003/blockchain-go/internal/transaction"
-    "github.com/OmSingh2003/blockchain-go/internal/wallet"
+    "github.com/OmSingh2003/decentralized-ledger/internal/blockchain"
+    "github.com/OmSingh2003/decentralized-ledger/internal/crypto/pow"
+    "github.com/OmSingh2003/decentralized-ledger/internal/transaction"
+    "github.com/OmSingh2003/decentralized-ledger/internal/wallet"
 )
 
 // CLI responsible for processing command line arguments

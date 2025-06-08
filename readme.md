@@ -1,6 +1,6 @@
-# Blockchain in Go
+# Decentralized Ledger
 
-A complete blockchain implementation written in Go, featuring proof-of-work consensus, wallet management, and transaction processing with UTXO (Unspent Transaction Output) model.
+A complete decentralized ledger system written in Go, featuring proof-of-work consensus, wallet management, and transaction processing with UTXO (Unspent Transaction Output) model.
 
 ## Features
 
@@ -40,8 +40,8 @@ The project follows a clean modular architecture:
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/OmSingh2003/blockchain-go.git
-cd blockchain-go
+git clone https://github.com/OmSingh2003/decentralized-ledger.git
+cd decentralized-ledger
 ```
 
 2. Install dependencies:
@@ -51,7 +51,7 @@ go mod tidy
 
 3. Build the application:
 ```bash
-go build -o blockchain cmd/blockchain/main.go
+go build -o decentralized-ledger cmd/blockchain/main.go
 ```
 
 ## Quick Start
@@ -61,7 +61,7 @@ go build -o blockchain cmd/blockchain/main.go
 First, create a wallet to receive mining rewards:
 
 ```bash
-./blockchain createwallet
+./decentralized-ledger createwallet
 ```
 
 This will output your new wallet address. Save this address as you'll need it for the next step.
@@ -71,7 +71,7 @@ This will output your new wallet address. Save this address as you'll need it fo
 Create the genesis block and initialize the blockchain:
 
 ```bash
-./blockchain init -address YOUR_WALLET_ADDRESS
+./decentralized-ledger init -address YOUR_WALLET_ADDRESS
 ```
 
 Replace `YOUR_WALLET_ADDRESS` with the address from step 1.
@@ -81,7 +81,7 @@ Replace `YOUR_WALLET_ADDRESS` with the address from step 1.
 Check the balance of your wallet (should show mining reward from genesis block):
 
 ```bash
-./blockchain getbalance -address YOUR_WALLET_ADDRESS
+./decentralized-ledger getbalance -address YOUR_WALLET_ADDRESS
 ```
 
 ### 4. Create Another Wallet
@@ -89,7 +89,7 @@ Check the balance of your wallet (should show mining reward from genesis block):
 Create a second wallet to test transactions:
 
 ```bash
-./blockchain createwallet
+./decentralized-ledger createwallet
 ```
 
 ### 5. Send Coins
@@ -97,7 +97,7 @@ Create a second wallet to test transactions:
 Send coins from your first wallet to the second:
 
 ```bash
-./blockchain send -from SENDER_ADDRESS -to RECEIVER_ADDRESS -amount 10
+./decentralized-ledger send -from SENDER_ADDRESS -to RECEIVER_ADDRESS -amount 10
 ```
 
 ## Available Commands
@@ -119,32 +119,32 @@ Send coins from your first wallet to the second:
 
 ```bash
 # Create a new wallet
-./blockchain createwallet
+./decentralized-ledger createwallet
 
 # Initialize blockchain
-./blockchain init -address 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+./decentralized-ledger init -address 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
 
 # Check balance
-./blockchain getbalance -address 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+./decentralized-ledger getbalance -address 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
 
 # Send 10 coins
-./blockchain send -from 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa -to 1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2 -amount 10
+./decentralized-ledger send -from 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa -to 1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2 -amount 10
 
 # View the entire blockchain
-./blockchain printchain
+./decentralized-ledger printchain
 
 # List all wallet addresses
-./blockchain listaddresses
+./decentralized-ledger listaddresses
 
 # Rebuild UTXO set (if needed)
-./blockchain reindexutxo
+./decentralized-ledger reindexutxo
 ```
 
 ## Technical Details
 
 ### Proof of Work
 
-The blockchain uses a SHA-256 based proof-of-work algorithm. Miners must find a nonce that, when combined with block data, produces a hash with a specific number of leading zeros.
+The decentralized ledger uses a SHA-256 based proof-of-work algorithm. Miners must find a nonce that, when combined with block data, produces a hash with a specific number of leading zeros.
 
 ### UTXO Model
 
