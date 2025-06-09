@@ -53,7 +53,6 @@ func (pow *ProofOfWork) Run() {
 	pow.block.SetNonce(nonce)
 	pow.block.UpdateHash()            // UpdateHash also needs targetBits,so i have to make sure it is handled properly
 	pow.block.SetBits(pow.targetBits) // Set the bits in the block after mining
-	// gonna make this in block.go
 }
 
 // Validate validates proof-of-work

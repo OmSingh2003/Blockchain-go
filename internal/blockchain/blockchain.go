@@ -216,11 +216,8 @@ func (bc *Blockchain) getAdjustedTargetBits() (int64, error) {
 	if currentBlock.IsGenesisBlock() {
 		return INITIAL_TARGET_BITS, nil
 	}
-	// I have to get previous block
-	prevBlock, err := bc.FindBlock(currentBlock.PrevBlockHash)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get previous block: %v", err)
-	}
+	// Note: prevBlock not needed for current implementation
+	// but keeping this comment for future reference if needed
 
 	// Get the current tip block height: Then i will count back to get the height for adjustment calculation.
 	currentHeight := 0

@@ -176,7 +176,7 @@ func (cli *CLI) printChain() error {
 
         fmt.Printf("============ Block %x ============\n", block.Hash)
         fmt.Printf("Prev. block: %x\n", block.PrevBlockHash)
-        powCheck := pow.NewProofOfWork(block)
+        powCheck := pow.NewProofOfWork(block, block.GetBits())
         fmt.Printf("PoW: %s\n\n", strconv.FormatBool(powCheck.Validate()))
 
         for _, tx := range block.Transactions {
