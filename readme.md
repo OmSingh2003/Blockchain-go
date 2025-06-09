@@ -1,5 +1,8 @@
 # Decentralized Ledger
 
+[![Tests](https://github.com/OmSingh2003/decentralized-ledger/actions/workflows/test.yml/badge.svg)](https://github.com/OmSingh2003/decentralized-ledger/actions/workflows/test.yml)
+[![Go Version](https://img.shields.io/badge/Go-1.24.2-00ADD8?style=flat&logo=go)](https://golang.org/)
+
 A complete decentralized ledger system written in Go, featuring proof-of-work consensus, wallet management, and transaction processing with UTXO (Unspent Transaction Output) model.
 
 ## Features
