@@ -1,12 +1,12 @@
 package blockchain
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"math/big"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/OmSingh2003/decentralized-ledger/internal/block"
 	"github.com/OmSingh2003/decentralized-ledger/internal/crypto/pow"
@@ -20,11 +20,11 @@ const (
 	blocksBucket        = "blocks"
 	lastHashKey         = "l" // Key for storing the last block hash
 	genesisCoinbaseData = "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks"
-	// New constrains for difficulty adjustment 
-	TARGET_BLOCK_TIME_SECONDS = 600 // 10 minutes per block 
-	DIFFICULTY_ADJUSTMENT_BLOCKS = 2025 // Adjust difficulty every 2025 blocks 
-	MAX_ADJUSTMENT_FACTOR = 4 //Limit difficulty to 4X (1/4 or 4X )
-	INITIAL_TARGET_BITS = 24 // Starting difficulty for genesis block 
+	// New constrains for difficulty adjustment
+	TARGET_BLOCK_TIME_SECONDS    = 600  // 10 minutes per block
+	DIFFICULTY_ADJUSTMENT_BLOCKS = 2025 // Adjust difficulty every 2025 blocks
+	MAX_ADJUSTMENT_FACTOR        = 4    // Limit difficulty to 4X (1/4 or 4X )
+	INITIAL_TARGET_BITS          = 24   // Starting difficulty for genesis block
 )
 
 // Blockchain represents the blockchain structure
@@ -96,7 +96,7 @@ func CreateBlockchain(minerWallet *wallet.Wallet) (*Blockchain, error) {
 		genesis := block.NewBlock([]*transaction.Transaction{cbtx}, []byte{})
 
 		// Mine the genesis block
-		powInstance := pow.NewProofOfWork(genesis)
+		powInstance := pow.NewProofOfWork(genesis, INITIAL_TARGET_BITS)
 		powInstance.Run()
 
 		// Create blocks bucket
@@ -159,17 +159,17 @@ func (bc *Blockchain) MineBlock(transactions []*transaction.Transaction) (*block
 
 	lastHash := bc.tip
 	newBlock := block.NewBlock(transactions, lastHash)
-	// Determine target Bits for future blocks 
-	currentTargetBits , err := bc.getAdjustedTargetBits()
+	// Determine target Bits for future blocks
+	currentTargetBits, err := bc.getAdjustedTargetBits()
 	if err != nil {
-		return  nil , fmt.Errorf("failed to get adjusted target Bits :%v",err)
+		return nil, fmt.Errorf("failed to get adjusted target Bits :%v", err)
 	}
 
 	// Mine the block with adjusted difficulty
-	powInstance := pow.NewProofOfWork(newBlock,currentTargetBits) // passing dynamic target bits over here !!LETs gooooo
+	powInstance := pow.NewProofOfWork(newBlock, currentTargetBits) // passing dynamic target bits over here !!LETs gooooo
 	powInstance.Run()
 
-	err := bc.db.Update(func(tx *bbolt.Tx) error {
+	err = bc.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
 		blockData, err := newBlock.Serialize()
 		if err != nil {
@@ -192,43 +192,144 @@ func (bc *Blockchain) MineBlock(transactions []*transaction.Transaction) (*block
 
 	return newBlock, err
 }
-//getAdjustedTargetBits calculates and returns the current target Bits for mining 
-//it adjusts difficulty every DIFFICULTY_ADJUSTMENT_BLOCKS blocks 
-func (bc *Blockchain) getAdjustedTargetBits() (int64,error) {
-	var currentBlock *block.Block
-	var err error 
-	// Get the current tip block to determine current height 
-	currentHash := bc.tip 
-	err = bc.db.View(func(tx *bbolt.Tx)error) {
-		b := tx.Bucket([]byte(blocksBucket))
-		blockdata := b.Get(currentHash)
-		if blockData == nil {
-			return  fmt.Errorf("tip block not found")
-		}
-		currentBlock,err = block.DeserializeBlock(blockData)
-		return err 
-}
-	if err != nil {
-		return 0 ,err
-	}
-	//For the genesis block 
-	//I have to get previous block 
 
-	// Get the current tip block height : Then i will count back to get the height for adjustment calculation.
-	currentHeight := 0 
+// getAdjustedTargetBits calculates and returns the current target Bits for mining
+// it adjusts difficulty every DIFFICULTY_ADJUSTMENT_BLOCKS blocks
+func (bc *Blockchain) getAdjustedTargetBits() (int64, error) {
+	var currentBlock *block.Block
+	var err error
+	// Get the current tip block to determine current height
+	currentHash := bc.tip
+	err = bc.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(blocksBucket))
+		blockData := b.Get(currentHash)
+		if blockData == nil {
+			return fmt.Errorf("tip block not found")
+		}
+		currentBlock, err = block.DeserializeBlock(blockData)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	// For the genesis block
+	if currentBlock.IsGenesisBlock() {
+		return INITIAL_TARGET_BITS, nil
+	}
+	// I have to get previous block
+	prevBlock, err := bc.FindBlock(currentBlock.PrevBlockHash)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get previous block: %v", err)
+	}
+
+	// Get the current tip block height: Then i will count back to get the height for adjustment calculation.
+	currentHeight := 0
 	bci := bc.Iterator()
 	for {
 		b, err := bci.Next()
-		if err:= nil {
-			return 0, err 
+		if err != nil {
+			return 0, err
 		}
 		if b == nil {
 			break
 		}
 		currentHeight++
-		if bytes.Equal(b.Hash, current )
+		if bytes.Equal(b.Hash, currentBlock.Hash) {
+			break
+		}
+	}
+
+	if currentHeight%DIFFICULTY_ADJUSTMENT_BLOCKS == 0 && currentHeight != 0 {
+		// find the first block of the last adjustment period
+		firstBlockOfPeriodHash := currentBlock.Hash
+		iter := bc.Iterator()
+		for i := 0; i < DIFFICULTY_ADJUSTMENT_BLOCKS; i++ {
+			b, err := iter.Next()
+			if err != nil || b == nil {
+				return 0, fmt.Errorf("failed to get block for difficulty calculation: %v", err)
+			}
+			firstBlockOfPeriodHash = b.Hash
+		}
+		firstBlockOfPeriod, err := bc.FindBlock(firstBlockOfPeriodHash)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get block for difficulty calculation: %v", err)
+		}
+
+		actualTimeTaken := currentBlock.Timestamp - firstBlockOfPeriod.Timestamp
+		expectedTimeTaken := int64(DIFFICULTY_ADJUSTMENT_BLOCKS) * TARGET_BLOCK_TIME_SECONDS
+
+		// Get the current target (from the previous block)
+		// For now, we'll use a standard calculation based on target bits
+		// You may need to modify this based on your block structure
+		prevTargetBits := INITIAL_TARGET_BITS // Default to initial if no stored target bits
+		if currentHeight > DIFFICULTY_ADJUSTMENT_BLOCKS {
+			// Try to get target bits from previous adjustment period
+			// This is a simplified approach - ideally store target bits in block
+			prevTargetBits = INITIAL_TARGET_BITS
+		}
+
+		// Calculate current target from target bits
+		currentTarget := big.NewInt(1)
+		currentTarget.Lsh(currentTarget, uint(256-prevTargetBits))
+
+		// Calculate new target
+		newTarget := new(big.Int).Set(currentTarget)
+		newTarget.Mul(newTarget, big.NewInt(actualTimeTaken))
+		newTarget.Div(newTarget, big.NewInt(expectedTimeTaken))
+
+		// Apply limits to prevent extreme difficulty changes
+		maxTarget := new(big.Int).Set(currentTarget)
+		maxTarget.Mul(maxTarget, big.NewInt(MAX_ADJUSTMENT_FACTOR))
+
+		minTarget := new(big.Int).Set(currentTarget)
+		minTarget.Div(minTarget, big.NewInt(MAX_ADJUSTMENT_FACTOR))
+
+		if newTarget.Cmp(maxTarget) == 1 { // if newTarget > maxTarget
+			newTarget.Set(maxTarget)
+		} else if newTarget.Cmp(minTarget) == -1 { // if newTarget < minTarget
+			newTarget.Set(minTarget)
+		}
+
+		// Convert new target back to bits
+		newTargetBits := 256 - newTarget.BitLen()
+		if newTargetBits < 1 { // Ensure targetBits doesn't go below 1
+			newTargetBits = 1
+		}
+		if newTargetBits > 255 { // Ensure targetBits doesn't go above 255
+			newTargetBits = 255
+		}
+
+		return int64(newTargetBits), nil
+
+	} else {
+		// If not adjustment period, use the targetBits from the previous block
+		// This is a simplified approach - ideally you'd store target bits in the block
+		// For now, we'll use the initial target bits as a fallback
+		return INITIAL_TARGET_BITS, nil
 	}
 }
+
+// FindBlock finds  block by its hash (new helper func)
+func (bc *Blockchain) FindBlock(hash []byte) (*block.Block, error) {
+	var blockData []byte
+	err := bc.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(blocksBucket))
+		blockData = b.Get(hash)
+		if blockData == nil {
+			return fmt.Errorf("block not found for hash: %x", hash)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	blk, err := block.DeserializeBlock(blockData)
+	if err != nil {
+		return nil, err
+	}
+	return blk, nil
+}
+
 // Iterator returns a BlockchainIterator
 func (bc *Blockchain) Iterator() *BlockchainIterator {
 	bc.mu.RLock()

@@ -37,7 +37,7 @@ func (pow *ProofOfWork) Run() {
 
 	fmt.Printf("Mining a new block")
 	for nonce < maxNonce {
-		data := pow.block.PrepareData(nonce, targetBits)
+		data := pow.block.PrepareData(nonce, pow.targetBits)
 		hash = sha256.Sum256(data)
 		hashInt.SetBytes(hash[:])
 
@@ -53,17 +53,23 @@ func (pow *ProofOfWork) Run() {
 	pow.block.SetNonce(nonce)
 	pow.block.UpdateHash()            // UpdateHash also needs targetBits,so i have to make sure it is handled properly
 	pow.block.SetBits(pow.targetBits) // Set the bits in the block after mining
+	// gonna make this in block.go
 }
 
 // Validate validates proof-of-work
 func (pow *ProofOfWork) Validate() bool {
 	var hashInt big.Int
-
-	data := pow.block.PrepareData(pow.block.GetNonce(), targetBits)
+	// Get targetBits from block itself for validation
+	data := pow.block.PrepareData(pow.block.GetNonce(), pow.targetBits)
 	hash := sha256.Sum256(data)
 	hashInt.SetBytes(hash[:])
 
 	isValid := hashInt.Cmp(pow.target) == -1
 
 	return isValid
+}
+
+// GetTarget retuns the calculated difficult target
+func (pow *ProofOfWork) GetTarget() *big.Int {
+	return pow.target
 }
