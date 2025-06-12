@@ -14,27 +14,31 @@ import (
 
 // Block represents a block in the blockchain
 type Block struct {
-	Timestamp     int64                      // Records when block was created/mined
-	Transactions  []*transaction.Transaction // stores Transactions
-	PrevBlockHash []byte                     // Stores the Hash of previous Block in the chain
-	Hash          []byte                     // Stores the Hash of current block in the chain
-	Nonce         int                        // Number used in proof of work
-	Bits          int64                      // Target bits for difficulty
-	mu            sync.RWMutex               // Mutex for thread safety
+	Timestamp       int64                      // Records when block was created/mined
+	Transactions    []*transaction.Transaction // stores Transactions
+	PrevBlockHash   []byte                     // Stores the Hash of previous Block in the chain
+	Hash            []byte                     // Stores the Hash of current block in the chain
+	Nonce           int                        // Number used in proof of work (retained for structural consistency, might be zero in PoS)
+	Bits            int64                      // Stores the difficulty target bits for this block (retained, might be zero or repurposed in PoS)
+	ValidatorPubKey []byte                     // Public key of the validator who signed this block
+	Signature       []byte                     // Signature of the block by the validator
+	mu              sync.RWMutex               // Mutex for thread safety
 }
 
 // NewBlock creates and returns a new Block
+// In PoS, the hash, nonce, bits, validator key, and signature are filled later by the consensus mechanism.
 func NewBlock(transactions []*transaction.Transaction, prevBlockHash []byte) *Block {
 	block := &Block{
-		Timestamp:     time.Now().Unix(),
-		Transactions:  transactions,
-		PrevBlockHash: prevBlockHash,
-		Hash:          []byte{},
-		Nonce:         0,
-		Bits:          0,
+		Timestamp:       time.Now().Unix(),
+		Transactions:    transactions,
+		PrevBlockHash:   prevBlockHash,
+		Hash:            []byte{},
+		Nonce:           0,
+		Bits:            0,
+		ValidatorPubKey: nil, // Initialize new fields
+		Signature:       nil, // Initialize new fields
 	}
-
-	// block.Hash = block.CalculateHash() NOTE: hash will be caluclated after nonce and bits are set by pow
+	// The actual Hash, Nonce, Bits, ValidatorPubKey, and Signature will be set by the consensus mechanism (PoW or PoS)
 	return block
 }
 
@@ -67,9 +71,8 @@ func (b *Block) hashTransactionsInternal() []byte {
 	return txHash[:]
 }
 
-// PrepareData prepares data for hashing by concatenating block data with nonce
-// This method is for internal use and doesn't acquire locks itself to prevent deadlocks
-// Caller should ensure thread safety if needed
+// PrepareData prepares data for hashing for PoW (still used by PoWConsensus)
+// For PoS, a similar function might be needed that includes PoS-specific header fields.
 func (b *Block) PrepareData(nonce int, targetBits int64) []byte {
 	data := bytes.Join(
 		[][]byte{
@@ -78,6 +81,28 @@ func (b *Block) PrepareData(nonce int, targetBits int64) []byte {
 			IntToHex(b.Timestamp),
 			IntToHex(targetBits),
 			IntToHex(int64(nonce)),
+		},
+		[]byte{},
+	)
+	return data
+}
+
+// GetHashableDataPoS prepares data for hashing specifically for PoS block signature.
+// This includes all relevant fields that define the block's identity before signing.
+func (b *Block) GetHashableDataPoS() []byte {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	data := bytes.Join(
+		[][]byte{
+			b.PrevBlockHash,
+			b.hashTransactionsInternal(), // Merkle root/hash of transactions
+			IntToHex(b.Timestamp),
+			IntToHex(b.Bits),         // Might be 0 or repurposed in PoS
+			IntToHex(int64(b.Nonce)), // Might be 0 or repurposed in PoS
+			// b.ValidatorPubKey should be included here if it's set before signing
+			// If ValidatorPubKey is set after signing, it shouldn't be included.
+			b.ValidatorPubKey,
 		},
 		[]byte{},
 	)
@@ -131,14 +156,21 @@ func (b *Block) ValidateBlock(prevTXs map[string]transaction.Transaction) error 
 		return nil
 	}
 
-	// Regular block validation
+	// Regular block validation common to both PoW/PoS
 	if len(b.Transactions) == 0 {
 		return fmt.Errorf("block must contain at least one transaction")
 	}
 
-	// Validate each transaction
+	// Ensure first transaction is coinbase
+	if !b.Transactions[0].IsCoinbase() {
+		return fmt.Errorf("first transaction must be coinbase")
+	}
+
+	// Validate each transaction (signatures already verified in VerifyTransaction in blockchain.go)
+	// This validation primarily checks the structure and internal consistency of transactions
 	for i, tx := range b.Transactions {
-		// Skip validation for coinbase transaction
+		// Coinbase transactions might have different validation rules depending on your chain's design
+		// For example, ensuring the reward amount is correct.
 		if tx.IsCoinbase() {
 			continue
 		}
@@ -148,24 +180,42 @@ func (b *Block) ValidateBlock(prevTXs map[string]transaction.Transaction) error 
 		}
 	}
 
-	// Ensure first transaction is coinbase
-	if !b.Transactions[0].IsCoinbase() {
-		return fmt.Errorf("first transaction must be coinbase")
-	}
-
 	return nil
 }
 
-// UpdateHash updates the block's hash based on its current state
+// UpdateHash updates the block's hash based on its current state (used by PoW)
 func (b *Block) UpdateHash() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// use bits from the block itself for hashing after PoW has set it
+	// Use Bits from the block itself for PoW hash
 	data := b.PrepareData(b.Nonce, b.Bits)
 	hash := sha256.Sum256(data)
 	b.Hash = hash[:]
 	return nil
+}
+
+// CalculateHash calculates and returns the hash of the block (used by PoW)
+func (b *Block) CalculateHash() []byte {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	// Use Bits from the block itself for PoW hash
+	data := b.PrepareData(b.Nonce, b.Bits)
+	hash := sha256.Sum256(data)
+	return hash[:]
+}
+
+// GetPoSHash calculates and returns the hash of the block specifically for PoS
+// This hash should be used for signing and for the block's final ID.
+func (b *Block) GetPoSHash() []byte {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	// Hash the data relevant to the block's identity for PoS
+	data := b.GetHashableDataPoS()
+	hash := sha256.Sum256(data)
+	return hash[:]
 }
 
 // SetNonce sets the nonce of the block in a thread-safe manner
@@ -185,7 +235,7 @@ func (b *Block) GetHash() []byte {
 // GetNonce returns the nonce of the block in a thread-safe manner
 func (b *Block) GetNonce() int {
 	b.mu.RLock()
-	defer b.mu.RUnlock()
+	defer b.mu.Unlock()
 	return b.Nonce
 }
 
@@ -196,9 +246,37 @@ func (b *Block) SetBits(bits int64) {
 	b.Bits = bits
 }
 
-// GetBits returns the bits of the block in a thread-safe manner (New method)
+// GetBits returns the bits of the block in a thread-safe manner
 func (b *Block) GetBits() int64 {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return b.Bits
+}
+
+// SetValidatorPubKey sets the validator's public key
+func (b *Block) SetValidatorPubKey(pubKey []byte) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.ValidatorPubKey = pubKey
+}
+
+// GetValidatorPubKey returns the validator's public key
+func (b *Block) GetValidatorPubKey() []byte {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.ValidatorPubKey
+}
+
+// SetSignature sets the block's signature
+func (b *Block) SetSignature(sig []byte) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.Signature = sig
+}
+
+// GetSignature returns the block's signature
+func (b *Block) GetSignature() []byte {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.Signature
 }
