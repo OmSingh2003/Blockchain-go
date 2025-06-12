@@ -199,25 +199,45 @@ func (w *Wallet) SignData(data []byte) ([]byte, error) {
         return nil, err
     }
 
-    signature := append(r.Bytes(), s.Bytes()...)
+    // Ensure each component is exactly 32 bytes
+    rBytes := r.Bytes()
+    sBytes := s.Bytes()
+    
+    // Pad with leading zeros if necessary
+    rPadded := make([]byte, 32)
+    sPadded := make([]byte, 32)
+    
+    copy(rPadded[32-len(rBytes):], rBytes)
+    copy(sPadded[32-len(sBytes):], sBytes)
+    
+    signature := append(rPadded, sPadded...)
     return signature, nil
 }
 
 // VerifySignature verifies a signature against public key and data
 func VerifySignature(pubKey []byte, data []byte, signature []byte) bool {
-    curve := elliptic.P256()
-    r := new(ecdsa.PublicKey)
-    r.Curve = curve
-    r.X, r.Y = curve.ScalarBaseMult(pubKey)
+	if len(pubKey) != 64 {
+		return false // Public key should be 64 bytes (32 bytes X + 32 bytes Y)
+	}
 
-    if len(signature) != 64 {
-        return false
-    }
+	if len(signature) != 64 {
+		return false
+	}
 
-    rSign := new(big.Int).SetBytes(signature[:32])
-    sSign := new(big.Int).SetBytes(signature[32:])
+	curve := elliptic.P256()
+	x := new(big.Int).SetBytes(pubKey[:32])
+	y := new(big.Int).SetBytes(pubKey[32:])
 
-    return ecdsa.Verify(r, data, rSign, sSign)
+	publicKey := ecdsa.PublicKey{
+		Curve: curve,
+		X:     x,
+		Y:     y,
+	}
+
+	rSign := new(big.Int).SetBytes(signature[:32])
+	sSign := new(big.Int).SetBytes(signature[32:])
+
+	return ecdsa.Verify(&publicKey, data, rSign, sSign)
 }
 
 // Checksum generates a checksum for a public key
