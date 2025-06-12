@@ -3,17 +3,31 @@
 [![Tests](https://github.com/OmSingh2003/decentralized-ledger/actions/workflows/test.yml/badge.svg)](https://github.com/OmSingh2003/decentralized-ledger/actions/workflows/test.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.24.2-00ADD8?style=flat&logo=go)](https://golang.org/)
 
-A complete decentralized ledger system written in Go, featuring proof-of-work consensus, wallet management, and transaction processing with UTXO (Unspent Transaction Output) model.
+A complete decentralized ledger system written in Go, featuring multiple consensus algorithms (PoW and PoS), wallet management, and transaction processing with UTXO (Unspent Transaction Output) model.
 
 ## Features
 
-- **Proof of Work (PoW)**: Secure mining algorithm with adjustable difficulty
+### Core Blockchain Features
+- **Multiple Consensus Algorithms**:
+  - **Proof of Work (PoW)**: Secure mining algorithm with dynamic difficulty adjustment
+  - **Proof of Stake (PoS)**: Energy-efficient consensus with validator signatures (In Development)
 - **UTXO Model**: Bitcoin-like transaction model for efficient balance tracking
-- **Wallet Management**: Create and manage multiple wallets with cryptographic key pairs
-- **Persistent Storage**: BoltDB for reliable blockchain data storage
-- **Transaction Processing**: Send and receive coins between addresses
+- **Dynamic Difficulty Adjustment**: Automatic mining difficulty adjustment based on block time
 - **Merkle Trees**: Efficient transaction verification and integrity
-- **CLI Interface**: Command-line interface for easy blockchain interaction
+- **Persistent Storage**: BoltDB for reliable blockchain data storage
+
+### Wallet & Transaction Management
+- **Wallet Management**: Create and manage multiple wallets with cryptographic key pairs
+- **Transaction Processing**: Send and receive coins between addresses
+- **Digital Signatures**: ECDSA-based transaction signing and verification
+- **Address Generation**: Base58 encoding with checksum validation
+
+### Developer Experience
+- **CLI Interface**: Comprehensive command-line interface for blockchain interaction
+- **Modular Architecture**: Clean separation of concerns with pluggable consensus
+- **Comprehensive Testing**: Unit tests for critical components
+- **CI/CD Pipeline**: Automated testing with GitHub Actions
+- **Makefile**: Convenient build and development commands
 
 ## Architecture
 
