@@ -185,7 +185,7 @@ func (bc *Blockchain) MineBlock(transactions []*transaction.Transaction, propose
 				if err != nil {
 					return nil, err
 				}
-				prevTXs[hex.EncodeToString(prevTX.ID)] = *prevTX
+				prevTXs[string(prevTX.ID)] = *prevTX
 			}
 		}
 	}
@@ -509,7 +509,7 @@ func (bc *Blockchain) FindTransaction(ID []byte) (*transaction.Transaction, erro
 		}
 
 		for _, tx := range block.Transactions {
-			if bytes.Equal(tx.ID, ID) {
+			if hex.EncodeToString(tx.ID) == hex.EncodeToString(ID) {
 				return tx, nil
 			}
 		}
