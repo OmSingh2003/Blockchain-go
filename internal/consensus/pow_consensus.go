@@ -7,6 +7,7 @@ import (
 	"github.com/OmSingh2003/decentralized-ledger/internal/block"
 	"github.com/OmSingh2003/decentralized-ledger/internal/crypto/pow"
 	"github.com/OmSingh2003/decentralized-ledger/internal/transaction"
+	"github.com/OmSingh2003/decentralized-ledger/internal/wallet"
 	"go.etcd.io/bbolt"
 )
 
@@ -25,8 +26,13 @@ type POWConsensus struct {
 	// NOTE: thinking of changing database
 }
 
+// NewPOWConsensus creates a new POWConsensus instance
+func NewPOWConsensus(db *bbolt.DB) *POWConsensus {
+	return &POWConsensus{db: db}
+}
+
 // Propose block for POW consensus is like finding a nonce
-func (p *POWConsensus) ProposeBlock(transactions []*transaction.Transaction, prevBlockHash []byte, currentTipHash []byte) (*block.Block, error) {
+func (p *POWConsensus) ProposeBlock(proposerWallet *wallet.Wallet, transactions []*transaction.Transaction, prevBlockHash []byte, currentTipHash []byte) (*block.Block, error) {
 	newBlock := block.NewBlock(transactions, prevBlockHash)
 
 	// Determine targetBits for the new block
