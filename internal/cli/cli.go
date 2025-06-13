@@ -7,6 +7,7 @@ import (
     "strconv"
 
     "github.com/OmSingh2003/decentralized-ledger/internal/blockchain"
+    "github.com/OmSingh2003/decentralized-ledger/internal/consensus"
     "github.com/OmSingh2003/decentralized-ledger/internal/crypto/pow"
     "github.com/OmSingh2003/decentralized-ledger/internal/transaction"
     "github.com/OmSingh2003/decentralized-ledger/internal/wallet"
@@ -23,13 +24,14 @@ func NewCLI(bc *blockchain.Blockchain) *CLI {
 }
 
 func (cli *CLI) printUsage() {
-    fmt.Println("Usage:")
-    fmt.Println("  createwallet - Creates a new wallet")
-    fmt.Println("  getbalance -address ADDRESS - Get balance of ADDRESS")
-    fmt.Println("  listaddresses - Lists all addresses from the wallet file")
-    fmt.Println("  printchain - Print all the blocks of the blockchain")
-    fmt.Println("  reindexutxo - Rebuilds the UTXO set")
-    fmt.Println("  send -from FROM -to TO -amount AMOUNT - Send AMOUNT of coins from FROM address to TO")
+	fmt.Println("Usage:")
+	fmt.Println("  createwallet - Creates a new wallet")
+	fmt.Println("  getbalance -address ADDRESS - Get balance of ADDRESS")
+	fmt.Println("  listaddresses - Lists all addresses from the wallet file")
+	fmt.Println("  printchain - Print all the blocks of the blockchain")
+	fmt.Println("  reindexutxo - Rebuilds the UTXO set")
+	fmt.Println("  send -from FROM -to TO -amount AMOUNT - Send AMOUNT of coins from FROM address to TO")
+	fmt.Println("  stake -address ADDRESS -amount AMOUNT - Add stake for PoS validator")
 }
 
 // validateArgs validates command line arguments
@@ -44,17 +46,20 @@ func (cli *CLI) validateArgs() {
 func (cli *CLI) Run() error {
     cli.validateArgs()
 
-    createWalletCmd := flag.NewFlagSet("createwallet", flag.ExitOnError)
-    getBalanceCmd := flag.NewFlagSet("getbalance", flag.ExitOnError)
-    listAddressesCmd := flag.NewFlagSet("listaddresses", flag.ExitOnError)
-    printChainCmd := flag.NewFlagSet("printchain", flag.ExitOnError)
-    reindexUTXOCmd := flag.NewFlagSet("reindexutxo", flag.ExitOnError)
-    sendCmd := flag.NewFlagSet("send", flag.ExitOnError)
+	createWalletCmd := flag.NewFlagSet("createwallet", flag.ExitOnError)
+	getBalanceCmd := flag.NewFlagSet("getbalance", flag.ExitOnError)
+	listAddressesCmd := flag.NewFlagSet("listaddresses", flag.ExitOnError)
+	printChainCmd := flag.NewFlagSet("printchain", flag.ExitOnError)
+	reindexUTXOCmd := flag.NewFlagSet("reindexutxo", flag.ExitOnError)
+	sendCmd := flag.NewFlagSet("send", flag.ExitOnError)
+	stakeCmd := flag.NewFlagSet("stake", flag.ExitOnError)
 
-    getBalanceAddress := getBalanceCmd.String("address", "", "The address to get balance for")
-    sendFrom := sendCmd.String("from", "", "Source wallet address")
-    sendTo := sendCmd.String("to", "", "Destination wallet address")
-    sendAmount := sendCmd.Int("amount", 0, "Amount to send")
+	getBalanceAddress := getBalanceCmd.String("address", "", "The address to get balance for")
+	sendFrom := sendCmd.String("from", "", "Source wallet address")
+	sendTo := sendCmd.String("to", "", "Destination wallet address")
+	sendAmount := sendCmd.Int("amount", 0, "Amount to send")
+	stakeAddress := stakeCmd.String("address", "", "The address to stake from")
+	stakeAmount := stakeCmd.Int64("amount", 0, "Amount to stake")
 
     switch os.Args[1] {
     case "createwallet":
@@ -82,14 +87,19 @@ func (cli *CLI) Run() error {
         if err != nil {
             return err
         }
-    case "send":
-        err := sendCmd.Parse(os.Args[2:])
-        if err != nil {
-            return err
-        }
-    default:
-        cli.printUsage()
-        return fmt.Errorf("invalid command")
+	case "send":
+		err := sendCmd.Parse(os.Args[2:])
+		if err != nil {
+			return err
+		}
+	case "stake":
+		err := stakeCmd.Parse(os.Args[2:])
+		if err != nil {
+			return err
+		}
+	default:
+		cli.printUsage()
+		return fmt.Errorf("invalid command")
     }
 
     if createWalletCmd.Parsed() {
@@ -116,15 +126,23 @@ func (cli *CLI) Run() error {
         return cli.reindexUTXO()
     }
 
-    if sendCmd.Parsed() {
-        if *sendFrom == "" || *sendTo == "" || *sendAmount <= 0 {
-            sendCmd.Usage()
-            return fmt.Errorf("from, to and amount are required")
-        }
-        return cli.send(*sendFrom, *sendTo, *sendAmount)
-    }
+	if sendCmd.Parsed() {
+		if *sendFrom == "" || *sendTo == "" || *sendAmount <= 0 {
+			sendCmd.Usage()
+			return fmt.Errorf("from, to and amount are required")
+		}
+		return cli.send(*sendFrom, *sendTo, *sendAmount)
+	}
 
-    return nil
+	if stakeCmd.Parsed() {
+		if *stakeAddress == "" || *stakeAmount <= 0 {
+			stakeCmd.Usage()
+			return fmt.Errorf("address and amount are required")
+		}
+		return cli.addStake(*stakeAddress, *stakeAmount)
+	}
+
+	return nil
 }
 
 func (cli *CLI) createWallet() error {
@@ -176,8 +194,17 @@ func (cli *CLI) printChain() error {
 
         fmt.Printf("============ Block %x ============\n", block.Hash)
         fmt.Printf("Prev. block: %x\n", block.PrevBlockHash)
-        powCheck := pow.NewProofOfWork(block, block.GetBits())
-        fmt.Printf("PoW: %s\n\n", strconv.FormatBool(powCheck.Validate()))
+        
+        // Check if this is a PoS block (has validator signature)
+        if len(block.GetValidatorPubKey()) > 0 {
+            fmt.Printf("PoS Block - Validator: %x\n", block.GetValidatorPubKey())
+            fmt.Printf("Signature: %x\n", block.GetSignature())
+        } else {
+            // This is a PoW block
+            powCheck := pow.NewProofOfWork(block, block.GetBits())
+            fmt.Printf("PoW: %s\n", strconv.FormatBool(powCheck.Validate()))
+        }
+        fmt.Println()
 
         for _, tx := range block.Transactions {
             fmt.Println(tx)
@@ -216,18 +243,24 @@ func (cli *CLI) send(from, to string, amount int) error {
 
     UTXOSet := blockchain.UTXOSet{Blockchain: cli.bc}
 
-    tx, err := transaction.NewUTXOTransaction(fromWallet, toWallet.PublicKey, amount, UTXOSet.FindSpendableOutputs)
+    tx, err := transaction.NewUTXOTransaction(fromWallet, wallet.HashPubKey(toWallet.PublicKey), amount, UTXOSet.FindSpendableOutputs)
     if err != nil {
         return fmt.Errorf("failed to create transaction: %v", err)
+    }
+
+    // Sign the transaction
+    err = cli.bc.SignTransaction(tx, fromWallet)
+    if err != nil {
+        return fmt.Errorf("failed to sign transaction: %v", err)
     }
 
     cbTx := transaction.NewCoinbaseTx(fromWallet.PublicKey, "")
     txs := []*transaction.Transaction{cbTx, tx}
 
-    newBlock, err := cli.bc.MineBlock(txs)
-    if err != nil {
-        return fmt.Errorf("failed to mine new block: %v", err)
-    }
+	newBlock, err := cli.bc.MineBlock(txs, fromWallet)
+	if err != nil {
+		return fmt.Errorf("failed to mine new block: %v", err)
+	}
 
     err = UTXOSet.Update(newBlock)
     if err != nil {
@@ -236,4 +269,27 @@ func (cli *CLI) send(from, to string, amount int) error {
 
     fmt.Println("Success!")
     return nil
+}
+
+// addStake adds stake for a PoS validator
+func (cli *CLI) addStake(address string, amount int64) error {
+	w := wallet.LoadWallet(address)
+	if w == nil {
+		return fmt.Errorf("wallet not found for address: %s", address)
+	}
+
+	// Get the PoS consensus instance from blockchain
+	posConsensus, ok := cli.bc.GetConsensus().(*consensus.PoSConsensus)
+	if !ok {
+		return fmt.Errorf("blockchain is not using PoS consensus")
+	}
+
+	// Add stake for the validator
+	err := posConsensus.AddStake(amount, w)
+	if err != nil {
+		return fmt.Errorf("failed to add stake: %v", err)
+	}
+
+	fmt.Printf("Successfully added stake of %d for validator %s\n", amount, address)
+	return nil
 }

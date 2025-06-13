@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/OmSingh2003/decentralized-ledger/internal/block"
-	"github.com/OmSingh2003/decentralized-ledger/internal/crypto/pow"
+	"github.com/OmSingh2003/decentralized-ledger/internal/consensus"
 	"github.com/OmSingh2003/decentralized-ledger/internal/transaction"
 	"github.com/OmSingh2003/decentralized-ledger/internal/wallet"
 	"go.etcd.io/bbolt"
@@ -29,9 +29,10 @@ const (
 
 // Blockchain represents the blockchain structure
 type Blockchain struct {
-	tip []byte       // Hash of the latest block
-	db  *bbolt.DB    // Database connection
-	mu  sync.RWMutex // Mutex for thread safety
+	tip       []byte                // Hash of the latest block
+	db        *bbolt.DB             // Database connection
+	consensus consensus.Consensus    // Consensus mechanism (PoW or PoS)
+	mu        sync.RWMutex          // Mutex for thread safety
 }
 
 // BlockchainIterator is used to iterate over blockchain blocks
@@ -40,7 +41,7 @@ type BlockchainIterator struct {
 	db          *bbolt.DB
 }
 
-// NewBlockchain opens an existing blockchain
+// NewBlockchain opens an existing blockchain with PoS consensus
 func NewBlockchain() (*Blockchain, error) {
 	// Only open existing blockchain
 	if !DbExists() {
@@ -66,11 +67,13 @@ func NewBlockchain() (*Blockchain, error) {
 		return nil, err
 	}
 
-	bc := Blockchain{tip, db, sync.RWMutex{}}
+	// Use PoS consensus by default
+	posConsensus := consensus.NewPoSConsensus(db)
+	bc := Blockchain{tip, db, posConsensus, sync.RWMutex{}}
 	return &bc, nil
 }
 
-// CreateBlockchain creates a new blockchain with a genesis block
+// CreateBlockchain creates a new blockchain with a genesis block using PoS
 func CreateBlockchain(minerWallet *wallet.Wallet) (*Blockchain, error) {
 	// Check if blockchain already exists
 	if DbExists() {
@@ -88,16 +91,24 @@ func CreateBlockchain(minerWallet *wallet.Wallet) (*Blockchain, error) {
 		return nil, fmt.Errorf("cannot open blockchain db: %v", err)
 	}
 
+	// Create PoS consensus and add the miner as initial validator
+	posConsensus := consensus.NewPoSConsensus(db)
+	err = posConsensus.AddStake(1000, minerWallet) // Initial stake for genesis validator
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to add genesis validator: %v", err)
+	}
+
 	var tip []byte
 	err = db.Update(func(tx *bbolt.Tx) error {
 		// Create coinbase transaction with miner's address
-		// Pass the public key directly - the hash will be calculated inside NewCoinbaseTx
 		cbtx := transaction.NewCoinbaseTx(minerWallet.PublicKey, genesisCoinbaseData)
-		genesis := block.NewBlock([]*transaction.Transaction{cbtx}, []byte{})
 
-		// Mine the genesis block
-		powInstance := pow.NewProofOfWork(genesis, INITIAL_TARGET_BITS)
-		powInstance.Run()
+		// Use PoS to propose the genesis block
+		genesisBlock, err := posConsensus.ProposeBlock(minerWallet, []*transaction.Transaction{cbtx}, []byte{}, []byte{})
+		if err != nil {
+			return fmt.Errorf("failed to propose genesis block: %v", err)
+		}
 
 		// Create blocks bucket
 		b, err := tx.CreateBucket([]byte(blocksBucket))
@@ -106,23 +117,23 @@ func CreateBlockchain(minerWallet *wallet.Wallet) (*Blockchain, error) {
 		}
 
 		// Store the genesis block
-		blockData, err := genesis.Serialize()
+		blockData, err := genesisBlock.Serialize()
 		if err != nil {
 			return err
 		}
 
-		err = b.Put(genesis.Hash, blockData)
+		err = b.Put(genesisBlock.Hash, blockData)
 		if err != nil {
 			return err
 		}
 
 		// Store the last block hash
-		err = b.Put([]byte(lastHashKey), genesis.Hash)
+		err = b.Put([]byte(lastHashKey), genesisBlock.Hash)
 		if err != nil {
 			return err
 		}
 
-		tip = genesis.Hash
+		tip = genesisBlock.Hash
 		return nil
 	})
 	if err != nil {
@@ -130,8 +141,8 @@ func CreateBlockchain(minerWallet *wallet.Wallet) (*Blockchain, error) {
 		return nil, fmt.Errorf("failed to create genesis block: %v", err)
 	}
 
-	// Create blockchain instance
-	bc := Blockchain{tip, db, sync.RWMutex{}}
+	// Create blockchain instance with PoS consensus
+	bc := Blockchain{tip, db, posConsensus, sync.RWMutex{}}
 
 	// Initialize UTXO set
 	utxo := UTXOSet{&bc}
@@ -144,8 +155,8 @@ func CreateBlockchain(minerWallet *wallet.Wallet) (*Blockchain, error) {
 	return &bc, nil
 }
 
-// MineBlock mines a new block with the provided transactions
-func (bc *Blockchain) MineBlock(transactions []*transaction.Transaction) (*block.Block, error) {
+// MineBlock creates a new block using PoS consensus (validator proposing)
+func (bc *Blockchain) MineBlock(transactions []*transaction.Transaction, proposerWallet *wallet.Wallet) (*block.Block, error) {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
@@ -158,17 +169,33 @@ func (bc *Blockchain) MineBlock(transactions []*transaction.Transaction) (*block
 	}
 
 	lastHash := bc.tip
-	newBlock := block.NewBlock(transactions, lastHash)
-	// Determine target Bits for future blocks
-	currentTargetBits, err := bc.getAdjustedTargetBits()
+
+	// Use PoS consensus to propose the block
+	newBlock, err := bc.consensus.ProposeBlock(proposerWallet, transactions, lastHash, bc.tip)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get adjusted target Bits :%v", err)
+		return nil, fmt.Errorf("failed to propose block with PoS: %v", err)
 	}
 
-	// Mine the block with adjusted difficulty
-	powInstance := pow.NewProofOfWork(newBlock, currentTargetBits) // passing dynamic target bits over here !!LETs gooooo
-	powInstance.Run()
+	// Validate the proposed block
+	prevTXs := make(map[string]transaction.Transaction)
+	for _, tx := range transactions {
+		if !tx.IsCoinbase() {
+			for _, vin := range tx.Vin {
+				prevTX, err := bc.FindTransaction(vin.Txid)
+				if err != nil {
+					return nil, err
+				}
+				prevTXs[string(prevTX.ID)] = *prevTX
+			}
+		}
+	}
 
+	valid, err := bc.consensus.ValidateBlock(newBlock, prevTXs)
+	if err != nil || !valid {
+		return nil, fmt.Errorf("block validation failed: %v", err)
+	}
+
+	// Store the validated block
 	err = bc.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
 		blockData, err := newBlock.Serialize()
@@ -367,7 +394,8 @@ func (bc *Blockchain) FindUTXO() map[string][]transaction.TxOutput {
 
 	UTXO := make(map[string][]transaction.TxOutput)
 	spentTXOs := make(map[string][]int)
-	bci := bc.Iterator()
+	// Don't call Iterator() as it tries to acquire the same lock
+	bci := &BlockchainIterator{bc.tip, bc.db}
 
 	for {
 		block, err := bci.Next()
@@ -413,6 +441,28 @@ func (bc *Blockchain) FindUTXO() map[string][]transaction.TxOutput {
 	return UTXO
 }
 
+// SignTransaction signs a transaction using the provided wallet
+func (bc *Blockchain) SignTransaction(tx *transaction.Transaction, w *wallet.Wallet) error {
+	if tx.IsCoinbase() {
+		return nil
+	}
+
+	prevTXs := make(map[string]transaction.Transaction)
+
+	for _, vin := range tx.Vin {
+		prevTX, err := bc.FindTransaction(vin.Txid)
+		if err != nil {
+			return err
+		}
+		if prevTX == nil {
+			return fmt.Errorf("referenced transaction not found: %x", vin.Txid)
+		}
+		prevTXs[hex.EncodeToString(prevTX.ID)] = *prevTX
+	}
+
+	return tx.Sign(w, prevTXs)
+}
+
 // VerifyTransaction verifies transaction input signatures
 func (bc *Blockchain) VerifyTransaction(tx *transaction.Transaction) error {
 	if tx.IsCoinbase() {
@@ -445,7 +495,9 @@ func (bc *Blockchain) VerifyTransaction(tx *transaction.Transaction) error {
 
 // FindTransaction finds a transaction by its ID
 func (bc *Blockchain) FindTransaction(ID []byte) (*transaction.Transaction, error) {
-	bci := bc.Iterator()
+	// Don't call Iterator() as it tries to acquire the same lock
+	// Instead create iterator manually
+	bci := &BlockchainIterator{bc.tip, bc.db}
 
 	for {
 		block, err := bci.Next()
@@ -468,6 +520,13 @@ func (bc *Blockchain) FindTransaction(ID []byte) (*transaction.Transaction, erro
 	}
 
 	return nil, fmt.Errorf("transaction not found")
+}
+
+// GetConsensus returns the consensus mechanism used by the blockchain
+func (bc *Blockchain) GetConsensus() consensus.Consensus {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
+	return bc.consensus
 }
 
 // CloseDB closes the database
