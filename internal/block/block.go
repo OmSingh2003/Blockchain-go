@@ -143,7 +143,7 @@ func IntToHex(num int64) []byte {
 	return []byte(strconv.FormatInt(num, 10))
 }
 
-// ValidateBlock validates the block and its transactions
+// ValidateBlock validates the block and its transactions in parallel
 func (b *Block) ValidateBlock(prevTXs map[string]transaction.Transaction) error {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -166,18 +166,30 @@ func (b *Block) ValidateBlock(prevTXs map[string]transaction.Transaction) error 
 		return fmt.Errorf("first transaction must be coinbase")
 	}
 
-	// Validate each transaction (signatures already verified in VerifyTransaction in blockchain.go)
-	// This validation primarily checks the structure and internal consistency of transactions
+	// Validate transactions in parallel
+	var wg sync.WaitGroup
+	errs := make(chan error, len(b.Transactions))
+
 	for i, tx := range b.Transactions {
-		// Coinbase transactions might have different validation rules depending on your chain's design
-		// For example, ensuring the reward amount is correct.
 		if tx.IsCoinbase() {
 			continue
 		}
 
-		if err := tx.ValidateTransaction(prevTXs); err != nil {
-			return fmt.Errorf("invalid transaction at index %d: %v", i, err)
-		}
+		wg.Add(1)
+		go func(tx *transaction.Transaction, i int) {
+			defer wg.Done()
+			if err := tx.ValidateTransaction(prevTXs); err != nil {
+				errs <- fmt.Errorf("invalid transaction at index %d: %v", i, err)
+			}
+		}(tx, i)
+	}
+
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		// Return the first error found
+		return err
 	}
 
 	return nil
